@@ -22,3 +22,13 @@ Video Poker for Zeal 8-bit Computer.
 - Five card slots are mapped to the 5 placeholder regions from `cards.tmx`.
 - Fisher-Yates shuffling is used on a 52-card deck each deal.
 - Palette and tiles are streamed at runtime from `assets/cards_modified.ztp/.zts` in small chunks with `gfx_palette_load` / `gfx_tileset_load`.
+
+## Accreditation
+Zingot Games:
+https://opengameart.org/content/bitmap-font-pack
+www.zingot.com
+A few changes to the original assets have been made including the color palette.
+
+(Pixel) Poker Cards:
+https://ivoryred.itch.io/pixel-poker-cards
+A few changes to the original assets have been made including the color palette.
