@@ -5,17 +5,17 @@ Video Poker for Zeal 8-bit Computer.
 ## Controls
 
 - `UP` / `DOWN`: change bet on bet screen
-- `A`: toggle hold on selected card
-- `B` or `START`: deal / draw / continue
+- `A`,`S`,`D`,`F`,`G`: toggle hold on/off selected card
+- `SPACE` or `ENTER`: deal / draw / continue
 - `SELECT`: quit
 
 ## Assets used
 
-- `assets/1.2 Poker cards_modified.gif`: source file you added
+- `assets/1.2 Poker cards_modified.gif`: see accreditations below
 - `assets/cards_modified.gif`: single source used to generate shared `.ztp/.zts` palette+tiles
-- `assets/cards.tmx`: layout source used for placeholder coordinates and decorative tiles
+- `assets/cards.tmx`: Tiled layout
 
-## Rendering model
+## Rendering
 
 - Each dealt card is rendered as `3x4` tiles.
 - Five card slots are mapped to the 5 placeholder regions from `cards.tmx`.
