@@ -15,25 +15,35 @@
 #include "layout_map.h"
 #include "videopoker.h"
 
+/* Global graphics context used by ZVB drawing APIs. */
 gfx_context vctx;
 
+/* Current five cards on the table and working deck state. */
 static PokerCard cards[CARD_COUNT];
 static uint8_t deck[DECK_SIZE];
 static uint8_t deck_pos = 0;
+/* If credits drop below this, game resets bankroll to this value. */
 static const uint16_t MIN_CREDIT_RESTART = 15;
 
+/* High-level game flow: bet -> hold/draw -> result -> bet. */
 static GameState state = STATE_BET;
 
+/* Persistent player/game values. */
 static uint16_t credits = 15;
 static uint8_t bet = 1;
 static uint16_t win_amount = 0;
+
+/* UI state flags. */
 static uint8_t show_win_banner = 0;
-static uint8_t preview_ready = 0;
+static uint8_t show_card_faces = 0;
 static uint8_t needs_redraw = 1;
 static uint8_t needs_hud_redraw = 0;
+
+/* Small entropy accumulator mixed into RNG seed values. */
 static uint16_t entropy = 1;
 static uint8_t rng_seeded = 0;
 
+/* Snapshot of key events for one update tick. */
 typedef struct {
     uint8_t up;
     uint8_t down;
@@ -43,18 +53,23 @@ typedef struct {
     uint8_t hold_toggle[CARD_COUNT];
 } KeyEvents;
 
+/* Debounce timer to avoid Enter/Space double-triggering state transitions. */
 static uint8_t suppress_enter_ticks = 0;
 
+/* Map GID -> runtime tile ID remap generated from layout_map.h usage. */
 static uint16_t mapped_gids[MAP_TILE_CAPACITY];
 static uint8_t mapped_tiles[MAP_TILE_CAPACITY];
 static uint8_t mapped_count = 0;
 
+/* Position of each playable card slot (top-left tile of 3x4 card). */
 static const uint8_t slot_x[CARD_COUNT] = {5, 12, 19, 26, 33};
 static const uint8_t slot_y = 21;
 
+/* Text anchor per card for "HOLD" labels in the bottom panel. */
 static const uint8_t hold_x[CARD_COUNT] = {4, 11, 18, 25, 32};
 static const uint8_t hold_y = 27;
 
+/* HUD numeric fields in tiles. */
 static const uint8_t bet_x = 6;
 static const uint8_t bet_y = 17;
 static const uint8_t win_x = 19;
@@ -62,16 +77,23 @@ static const uint8_t win_y = 17;
 static const uint8_t credit_x = 34;
 static const uint8_t credit_y = 17;
 
+static void restart_if_credit_low(void);
+static void return_to_bet_phase(void);
+static void reseed_rng_for_new_hand(void);
+
+/* Card IDs are 0..51, grouped by suits in blocks of 13. */
 static uint8_t card_rank(uint8_t card)
 {
     return card % 13;
 }
 
+/* Suit index: 0..3 from card ID. */
 static uint8_t card_suit(uint8_t card)
 {
     return card / 13;
 }
 
+/* Translate TMX GID to the runtime tile ID loaded into VRAM. */
 static uint8_t map_gid_to_tile(uint16_t gid)
 {
     for (uint8_t i = 0; i < mapped_count; i++) {
@@ -88,8 +110,10 @@ static void load_ui_font_tiles(void)
     /* Frame tile used to highlight held cards */
     load_source_tile(&vctx, 1007, (uint16_t)HOLD_FRAME_TILE * TILE_SIZE);
 
+    /* Space/background tile used to clear text areas cleanly. */
     load_source_tile(&vctx, 981, (uint16_t)FONT_SPACE_TILE * TILE_SIZE);
 
+    /* Digits and A-Z are loaded from your font area in the tileset. */
     for (uint8_t i = 0; i < 10; i++) {
         load_source_tile(&vctx, (uint16_t)(1181 + i), (uint16_t)(FONT_DIGIT_TILE + i) * TILE_SIZE);
     }
@@ -110,6 +134,7 @@ static void load_ui_font_tiles(void)
     ascii_map('n', 13, 80); // N-Z
 }
 
+/* Restore one map cell from original TMX layout (used to erase overlays). */
 static void restore_map_cell(uint8_t x, uint8_t y)
 {
     uint16_t gid = kLayoutGids[(y * LAYOUT_W) + x];
@@ -118,6 +143,7 @@ static void restore_map_cell(uint8_t x, uint8_t y)
 
 static void draw_hold_frames(void)
 {
+    /* Draw/remove a 1-tile border around each card slot based on hold flag. */
     for (uint8_t i = 0; i < CARD_COUNT; i++) {
         uint8_t x0 = (uint8_t)(slot_x[i] - 1);
         uint8_t y0 = (uint8_t)(slot_y - 1);
@@ -148,6 +174,7 @@ static void draw_hold_frames(void)
 
 static void init_layout_tiles(void)
 {
+    /* Load each unique GID from the TMX map exactly once into VRAM tile slots. */
     mapped_count = 0;
 
     for (uint16_t i = 0; i < (LAYOUT_W * LAYOUT_H); i++) {
@@ -179,6 +206,7 @@ static void init_layout_tiles(void)
 
 static void render_layout(void)
 {
+    /* Paint the full static background UI from TMX-derived GID data. */
     for (uint8_t y = 0; y < LAYOUT_H; y++) {
         for (uint8_t x = 0; x < LAYOUT_W; x++) {
             uint16_t gid = kLayoutGids[(y * LAYOUT_W) + x];
@@ -190,12 +218,33 @@ static void render_layout(void)
 
 static void load_card_tiles_to_slot(uint8_t slot, uint8_t card)
 {
+    /* Each card is 3x4 tiles and each slot has its own destination tile block. */
     uint8_t dst_base_tile = (uint8_t)(DST_TILE_BASE + (slot * (SRC_CARD_W * SRC_CARD_H)));
     load_card_tiles(&vctx, card, (uint16_t)dst_base_tile * TILE_SIZE);
 }
 
+static void load_back_tiles_to_slot(uint8_t slot)
+{
+    /* Fixed 3x4 red-back card from your tileset (GIDs from cards.tmx layout). */
+    static const uint16_t back_gids[SRC_CARD_H][SRC_CARD_W] = {
+        {945, 946, 947},
+        {1004, 1005, 1006},
+        {1063, 1064, 1065},
+        {1122, 1123, 1124},
+    };
+    uint8_t dst_base_tile = (uint8_t)(DST_TILE_BASE + (slot * (SRC_CARD_W * SRC_CARD_H)));
+
+    for (uint8_t row = 0; row < SRC_CARD_H; row++) {
+        for (uint8_t col = 0; col < SRC_CARD_W; col++) {
+            uint8_t dst_tile = (uint8_t)(dst_base_tile + (row * SRC_CARD_W) + col);
+            load_source_tile(&vctx, back_gids[row][col], (uint16_t)dst_tile * TILE_SIZE);
+        }
+    }
+}
+
 static void place_card_slot(uint8_t slot)
 {
+    /* Blit the 3x4 tile block for one card to its table position. */
     uint8_t x0 = slot_x[slot];
     uint8_t dst_base_tile = (uint8_t)(DST_TILE_BASE + (slot * (SRC_CARD_W * SRC_CARD_H)));
 
@@ -209,6 +258,7 @@ static void place_card_slot(uint8_t slot)
 
 static void restore_hold_background(uint8_t slot)
 {
+    /* Keep helper in case per-slot text clears are needed again. */
     uint8_t bg = map_gid_to_tile(981);
     for (uint8_t col = 0; col < 4; col++) {
         uint8_t x = (uint8_t)(hold_x[slot] + col);
@@ -218,6 +268,7 @@ static void restore_hold_background(uint8_t slot)
 
 static void clear_bottom_row(void)
 {
+    /* Clears the action banner/hold row on tilemap layer 0. */
     uint8_t bg = map_gid_to_tile(981);
     for (uint8_t x = 2; x < 38; x++) {
         gfx_tilemap_place(&vctx, bg, TILEMAP_LAYER, x, hold_y);
@@ -226,6 +277,7 @@ static void clear_bottom_row(void)
 
 static void clear_hud_field(uint8_t x, uint8_t y, uint8_t width)
 {
+    /* Clears one numeric HUD field before printing a new value. */
     uint8_t bg = map_gid_to_tile(981);
     for (uint8_t i = 0; i < width; i++) {
         gfx_tilemap_place(&vctx, bg, TILEMAP_LAYER, (uint8_t)(x + i), y);
@@ -245,6 +297,12 @@ static void draw_hold_labels(void)
     /* nprint_string draws on layer 1, so clear that row explicitly too. */
     nprint_string(&vctx, clear_row, 36, 2, hold_y);
 
+    /*
+     * Banner policy:
+     * - BET phase: show DEAL
+     * - HOLD phase: show DRAW until at least one hold is set, then show HOLD labels
+     * - RESULT phase: show YOU HAVE WON! only for winning hands
+     */
     if (state != STATE_HOLD) {
         if (show_win_banner) {
             nprint_string(&vctx, won_text, 13, 13, hold_y);
@@ -272,6 +330,13 @@ static void draw_hold_labels(void)
 
 static uint8_t is_straight(const uint8_t ranks[13])
 {
+    /*
+     * ranks[0] is Ace.
+     * Supports:
+     * - normal 5-card runs
+     * - A-2-3-4-5
+     * - 10-J-Q-K-A
+     */
     uint8_t run = 0;
 
     for (uint8_t r = 0; r < 13; r++) {
@@ -298,11 +363,13 @@ static uint8_t is_straight(const uint8_t ranks[13])
 
 static uint8_t is_royal(const uint8_t ranks[13])
 {
+    /* Royal uses 10/J/Q/K/A ranks; suit is checked separately by flush logic. */
     return ranks[0] && ranks[9] && ranks[10] && ranks[11] && ranks[12];
 }
 
 static void shuffle_deck(void)
 {
+    /* Fisher-Yates shuffle over full 52-card deck. */
     for (uint8_t i = 0; i < DECK_SIZE; i++) {
         deck[i] = i;
     }
@@ -319,6 +386,7 @@ static void shuffle_deck(void)
 
 static uint8_t pop_deck(void)
 {
+    /* Safety fallback if deck is exhausted unexpectedly. */
     if (deck_pos >= DECK_SIZE) {
         shuffle_deck();
     }
@@ -332,6 +400,7 @@ static void draw_hud_values(void)
     char credit_buf[6];
     uint8_t bg = map_gid_to_tile(981);
 
+    /* Always print fixed-width 3 digits so HUD text does not jitter. */
     sprintf(bet_buf, "%03u ", bet);
     sprintf(win_buf, "%03u ", win_amount);
     sprintf(credit_buf, "%03u ", credits);
@@ -355,6 +424,7 @@ HandResult evaluate_hand(const uint8_t hand[CARD_COUNT])
     uint8_t trips = 0;
     uint8_t quads = 0;
 
+    /* Histogram ranks/suits once, then derive all categories from counts. */
     for (uint8_t i = 0; i < CARD_COUNT; i++) {
         rank_counts[card_rank(hand[i])]++;
         suit_counts[card_suit(hand[i])]++;
@@ -380,6 +450,10 @@ HandResult evaluate_hand(const uint8_t hand[CARD_COUNT])
         }
     }
 
+    /*
+     * Ranking priority follows the pay table from highest to lowest.
+     * First match returns immediately.
+     */
     if (straight && flush && is_royal(rank_counts)) {
         HandResult result = {250, "ROYAL"};
         return result;
@@ -424,16 +498,23 @@ HandResult evaluate_hand(const uint8_t hand[CARD_COUNT])
 
 void render_table(void)
 {
+    /* Static background render (called once at init). */
     render_layout();
 }
 
 void render_cards(void)
 {
+    /* Draw either face cards or red backs depending on phase. */
     for (uint8_t i = 0; i < CARD_COUNT; i++) {
-        load_card_tiles_to_slot(i, cards[i].card);
+        if (show_card_faces) {
+            load_card_tiles_to_slot(i, cards[i].card);
+        } else {
+            load_back_tiles_to_slot(i);
+        }
         place_card_slot(i);
     }
 
+    /* Dynamic overlays are redrawn every time cards/HUD state changes. */
     draw_hold_frames();
     draw_hold_labels();
     draw_hud_values();
@@ -441,12 +522,15 @@ void render_cards(void)
 
 void deal_hand(void)
 {
+    /* Deal five fresh cards and move to hold selection phase. */
     for (uint8_t i = 0; i < CARD_COUNT; i++) {
+        cards[i].card = pop_deck();
         cards[i].held = false;
     }
 
+    show_card_faces = 1;
     state = STATE_HOLD;
-    needs_hud_redraw = 1;
+    needs_redraw = 1;
 }
 
 void draw_hand(void)
@@ -454,6 +538,7 @@ void draw_hand(void)
     HandResult result;
     uint8_t hand[CARD_COUNT];
 
+    /* Replace only non-held cards. Held cards remain unchanged. */
     for (uint8_t i = 0; i < CARD_COUNT; i++) {
         if (!cards[i].held) {
             cards[i].card = pop_deck();
@@ -461,12 +546,20 @@ void draw_hand(void)
         hand[i] = cards[i].card;
     }
 
+    /* Score result and credit winnings (multiplier * current bet). */
     result = evaluate_hand(hand);
     win_amount = (uint16_t)result.multiplier * bet;
     credits += win_amount;
-    preview_ready = 0;
+    for (uint8_t i = 0; i < CARD_COUNT; i++) {
+        cards[i].held = false;
+    }
+    /*
+     * Keep final hand visible in RESULT phase so player can inspect outcome.
+     * Next Enter/Space returns to BET and shows backs again.
+     */
+    show_card_faces = 1;
     show_win_banner = (win_amount > 0);
-    state = STATE_BET;
+    state = STATE_RESULT;
     suppress_enter_ticks = 8;
     needs_redraw = 1;
     restart_if_credit_low();
@@ -474,39 +567,30 @@ void draw_hand(void)
 
 static void start_new_round(void)
 {
-    uint8_t cards_changed = 0;
-
+    /* Ensure RNG is valid, then begin a new paid hand. */
     if (!rng_seeded) {
         uint16_t seed = (uint16_t)(entropy | 1);
         rand8_seed(seed);
         rng_seeded = 1;
-        shuffle_deck();
     }
 
     if (credits == 0) {
         return;
     }
 
+    /* At hand start: take bet, clear previous win, reseed + reshuffle, deal. */
     credits -= bet;
     win_amount = 0;
     show_win_banner = 0;
-    if (!preview_ready) {
-        fill_preview_cards();
-        cards_changed = 1;
-    }
-    preview_ready = 0;
+    reseed_rng_for_new_hand();
+    shuffle_deck();
     deal_hand();
     suppress_enter_ticks = 8;
-
-    if (cards_changed) {
-        needs_redraw = 1;
-    } else {
-        needs_hud_redraw = 1;
-    }
 }
 
 static void seed_rng_from_time(void)
 {
+    /* Initial seeding at startup from system time and entropy accumulator. */
     zos_time_t now;
     uint16_t seed = 1;
 
@@ -524,16 +608,30 @@ static void seed_rng_from_time(void)
     rng_seeded = 1;
 }
 
-static void fill_preview_cards(void)
+static void reseed_rng_for_new_hand(void)
 {
-    for (uint8_t i = 0; i < CARD_COUNT; i++) {
-        cards[i].card = pop_deck();
-        cards[i].held = false;
+    /*
+     * Per-hand reseed to avoid repeating sequences between hands.
+     * Mixes entropy, bankroll, bet, previous win, and current clock millis.
+     */
+    zos_time_t now;
+    uint16_t seed = (uint16_t)(entropy ^ ((uint16_t)credits << 3) ^ ((uint16_t)bet << 9) ^ win_amount);
+
+    if (gettime(0, &now) == ERR_SUCCESS) {
+        seed ^= now.t_millis;
     }
+
+    if ((seed & 1U) == 0) {
+        seed++;
+    }
+
+    rand8_seed(seed);
+    rng_seeded = 1;
 }
 
 static void restart_if_credit_low(void)
 {
+    /* Auto-reset bankroll when dropping below minimum threshold. */
     if (credits >= MIN_CREDIT_RESTART) {
         return;
     }
@@ -542,18 +640,36 @@ static void restart_if_credit_low(void)
     bet = 1;
     win_amount = 0;
     show_win_banner = 0;
+    show_card_faces = 0;
     suppress_enter_ticks = 8;
 
     shuffle_deck();
-    fill_preview_cards();
-    preview_ready = 1;
     state = STATE_BET;
+    needs_redraw = 1;
+    needs_hud_redraw = 0;
+}
+
+static void return_to_bet_phase(void)
+{
+    /* Return from RESULT to BET UI: clear holds/banner and show red backs. */
+    for (uint8_t i = 0; i < CARD_COUNT; i++) {
+        cards[i].held = false;
+    }
+
+    show_win_banner = 0;
+    show_card_faces = 0;
+    state = STATE_BET;
+    suppress_enter_ticks = 8;
     needs_redraw = 1;
     needs_hud_redraw = 0;
 }
 
 static void poll_keys(KeyEvents* ev)
 {
+    /*
+     * Read all pending keyboard bytes this tick and convert to one-shot events.
+     * KB_RELEASED marker is skipped so hold toggles happen on press only.
+     */
     uint8_t buf[32];
     uint8_t released = 0;
 
@@ -599,6 +715,7 @@ static void poll_keys(KeyEvents* ev)
 
 void init(void)
 {
+    /* Initialize input, graphics mode, assets, and initial BET screen state. */
     zos_err_t err = input_init(true);
     if (err != ERR_SUCCESS) {
         printf("Input init failed: %d\n", err);
@@ -625,8 +742,7 @@ void init(void)
 
     seed_rng_from_time();
     shuffle_deck();
-    fill_preview_cards();
-    preview_ready = 1;
+    show_card_faces = 0;
     state = STATE_BET;
     render_cards();
     needs_redraw = 0;
@@ -637,11 +753,13 @@ void init(void)
 
 void deinit(void)
 {
+    /* Restore text screen before exiting back to shell/system. */
     ioctl(DEV_STDOUT, CMD_RESET_SCREEN, NULL);
 }
 
 void update(void)
 {
+    /* Game logic tick: input/state transitions only (no VRAM drawing here). */
     KeyEvents ev;
     poll_keys(&ev);
     entropy++;
@@ -655,6 +773,7 @@ void update(void)
     }
 
     if (state == STATE_HOLD) {
+        /* Toggle holds with A/S/D/F/G; Enter performs draw. */
         for (uint8_t i = 0; i < CARD_COUNT; i++) {
             if (ev.hold_toggle[i]) {
                 cards[i].held ^= 1;
@@ -667,7 +786,20 @@ void update(void)
         return;
     }
 
-    if (state == STATE_RESULT || state == STATE_BET) {
+    if (state == STATE_RESULT) {
+        /* RESULT waits for confirmation before returning to BET phase. */
+        if (show_win_banner && (ev.up || ev.down || ev.enter || ev.space)) {
+            show_win_banner = 0;
+            needs_hud_redraw = 1;
+        }
+        if ((ev.enter || ev.space) && suppress_enter_ticks == 0) {
+            return_to_bet_phase();
+        }
+        return;
+    }
+
+    if (state == STATE_BET) {
+        /* BET phase: adjust bet with arrows, then Enter/Space to deal. */
         if (show_win_banner && (ev.up || ev.down || ev.enter || ev.space)) {
             show_win_banner = 0;
             needs_hud_redraw = 1;
@@ -689,6 +821,7 @@ void update(void)
 
 void draw(void)
 {
+    /* Render tick: full redraw on major changes, partial redraw for HUD/labels. */
     if (needs_redraw) {
         render_cards();
         needs_redraw = 0;
@@ -703,6 +836,7 @@ void draw(void)
 
 int main(void)
 {
+    /* Classic fixed game loop synced to VBlank for stable visual updates. */
     init();
 
     while (1) {
