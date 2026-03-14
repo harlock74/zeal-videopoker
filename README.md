@@ -26,7 +26,6 @@ Video Poker for Zeal 8-bit Computer.
 Author: Zingot Games  
 License: CC-BY 4.0
 https://opengameart.org/content/bitmap-font-pack
-www.zingot.com
 A few changes to the original assets have been made including the color palette.
 
 Author: (Pixel) Poker Cards  
