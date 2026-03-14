@@ -24,12 +24,12 @@ Video Poker for Zeal 8-bit Computer.
 
 ## Accreditation
 Author: Zingot Games  
-Licence: CC-BY 4.0
+License: CC-BY 4.0
 https://opengameart.org/content/bitmap-font-pack
 www.zingot.com
 A few changes to the original assets have been made including the color palette.
 
 Author: (Pixel) Poker Cards  
-Licence: CC-BY 4.0
+License: CC-BY 4.0
 https://ivoryred.itch.io/pixel-poker-cards
 A few changes to the original assets have been made including the color palette.
