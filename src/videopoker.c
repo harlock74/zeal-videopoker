@@ -22,14 +22,15 @@ gfx_context vctx;
 static PokerCard cards[CARD_COUNT];
 static uint8_t deck[DECK_SIZE];
 static uint8_t deck_pos = 0;
-/* If credits drop below this, game resets bankroll to this value. */
-static const uint16_t MIN_CREDIT_RESTART = 15;
+/* Bankroll at startup and after game-over reset. */
+#define INITIAL_CREDITS 5
+#define RESET_CREDITS 5
 
 /* High-level game flow: bet -> hold/draw -> result -> bet. */
 static GameState state = STATE_BET;
 
 /* Persistent player/game values. */
-static uint16_t credits = 15;
+static uint16_t credits = INITIAL_CREDITS;
 static uint8_t bet = 1;
 static uint16_t win_amount = 0;
 
@@ -126,12 +127,18 @@ static void load_ui_font_tiles(void)
         load_source_tile(&vctx, (uint16_t)(1204 + i), (uint16_t)(FONT_ALPHA_N_TILE + i) * TILE_SIZE);
     }
 
+    /* Punctuation tiles follow Z in the custom font strip. */
+    load_source_tile(&vctx, 1217, (uint16_t)FONT_COLON_TILE * TILE_SIZE);
+    load_source_tile(&vctx, 1218, (uint16_t)FONT_EXCL_TILE * TILE_SIZE);
+
     ascii_map(' ', 1, FONT_SPACE_TILE);
-    ascii_map('0', 10, 48); // 0-9
-    ascii_map('A', 13, 64); // A-M
-    ascii_map('a', 13, 64); // A-M
-    ascii_map('N', 13, 80); // N-Z
-    ascii_map('n', 13, 80); // N-Z
+    ascii_map('0', 10, FONT_DIGIT_TILE);    // 0-9
+    ascii_map('A', 13, FONT_ALPHA_A_TILE);  // A-M
+    ascii_map('a', 13, FONT_ALPHA_A_TILE);  // A-M
+    ascii_map('N', 13, FONT_ALPHA_N_TILE);  // N-Z
+    ascii_map('n', 13, FONT_ALPHA_N_TILE);  // N-Z
+    ascii_map(':', 1, FONT_COLON_TILE);
+    ascii_map('!', 1, FONT_EXCL_TILE);
 }
 
 /* Restore one map cell from original TMX layout (used to erase overlays). */
@@ -475,20 +482,20 @@ HandResult evaluate_hand(const uint8_t hand[CARD_COUNT])
         return result;
     }
     if (straight) {
-        HandResult result = {5, "STRAIT"};
+        HandResult result = {4, "STRAIT"};
         return result;
     }
     if (trips) {
-        HandResult result = {4, "3KIND"};
+        HandResult result = {3, "3KIND"};
         return result;
     }
     if (pairs == 2) {
-        HandResult result = {3, "2PAIR"};
+        HandResult result = {2, "2PAIR"};
         return result;
     }
 
     if (pairs == 1) {
-        HandResult result = {2, "PAIR"};
+        HandResult result = {1, "PAIR"};
         return result;
     }
 
@@ -631,12 +638,12 @@ static void reseed_rng_for_new_hand(void)
 
 static void restart_if_credit_low(void)
 {
-    /* Auto-reset bankroll when dropping below minimum threshold. */
-    if (credits >= MIN_CREDIT_RESTART) {
+    /* Restart only when bankroll is exhausted, not after ordinary losses. */
+    if (credits > 0) {
         return;
     }
 
-    credits = MIN_CREDIT_RESTART;
+    credits = RESET_CREDITS;
     bet = 1;
     win_amount = 0;
     show_win_banner = 0;

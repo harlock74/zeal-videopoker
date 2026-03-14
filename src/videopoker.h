@@ -17,14 +17,24 @@
 #define SRC_CARD_H 4
 #define DST_TILE_BASE 192
 
-#define FONT_DIGIT_TILE 48
-#define FONT_ALPHA_A_TILE 64
-#define FONT_ALPHA_N_TILE 80
-#define FONT_SPACE_TILE 96
+/*
+ * Runtime tile allocation:
+ *  - map tiles:   32..143
+ *  - font tiles:  144..179
+ *  - space tile:  180
+ *  - hold frame:  181
+ *  - card slots:  192..251 (5 cards * 3x4 = 60 tiles)
+ */
+#define MAP_TILE_BASE 32
+#define MAP_TILE_CAPACITY 112
 
-#define MAP_TILE_BASE 104
-#define MAP_TILE_CAPACITY 88
-#define HOLD_FRAME_TILE 252
+#define FONT_DIGIT_TILE 144
+#define FONT_ALPHA_A_TILE 154
+#define FONT_ALPHA_N_TILE 167
+#define FONT_SPACE_TILE 180
+#define FONT_COLON_TILE 182
+#define FONT_EXCL_TILE 183
+#define HOLD_FRAME_TILE 181
 
 #define TILEMAP_LAYER 0
 
