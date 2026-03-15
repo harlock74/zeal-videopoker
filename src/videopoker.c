@@ -72,6 +72,7 @@ static uint8_t mapped_count = 0;
 /* Position of each playable card slot (top-left tile of 3x4 card). */
 static const uint8_t slot_x[CARD_COUNT] = {5, 12, 19, 26, 33};
 static const uint8_t slot_y = 21;
+static const uint8_t all_slots[CARD_COUNT] = {0, 1, 2, 3, 4};
 
 /* Text anchor per card for "HOLD" labels in the bottom panel. */
 static const uint8_t hold_x[CARD_COUNT] = {4, 11, 18, 25, 32};
@@ -269,6 +270,19 @@ static void place_card_slot(uint8_t slot)
         for (uint8_t col = 0; col < SRC_CARD_W; col++) {
             uint8_t tile = (uint8_t)(dst_base_tile + (row * SRC_CARD_W) + col);
             gfx_tilemap_place(&vctx, tile, TILEMAP_LAYER, (uint8_t)(x0 + col), (uint8_t)(slot_y + row));
+        }
+    }
+}
+
+static void clear_card_slot(uint8_t slot)
+{
+    uint8_t x0 = slot_x[slot];
+    /* Use the tile immediately left of the slot as the table background fill. */
+    uint16_t bg_gid = kLayoutGids[(slot_y * LAYOUT_W) + (x0 - 1)];
+    uint8_t bg_tile = map_gid_to_tile(bg_gid);
+    for (uint8_t row = 0; row < SRC_CARD_H; row++) {
+        for (uint8_t col = 0; col < SRC_CARD_W; col++) {
+            gfx_tilemap_place(&vctx, bg_tile, TILEMAP_LAYER, (uint8_t)(x0 + col), (uint8_t)(slot_y + row));
         }
     }
 }
@@ -523,12 +537,16 @@ void render_cards(void)
 {
     /* Draw either face cards or red backs depending on phase. */
     for (uint8_t i = 0; i < CARD_COUNT; i++) {
-        if (show_card_faces && (reveal_mask & (uint8_t)(1U << i))) {
-            load_card_tiles_to_slot(i, cards[i].card);
+        if (reveal_mask & (uint8_t)(1U << i)) {
+            if (show_card_faces) {
+                load_card_tiles_to_slot(i, cards[i].card);
+            } else {
+                load_back_tiles_to_slot(i);
+            }
+            place_card_slot(i);
         } else {
-            load_back_tiles_to_slot(i);
+            clear_card_slot(i);
         }
-        place_card_slot(i);
     }
 
     /* Dynamic overlays are redrawn every time cards/HUD state changes. */
@@ -540,8 +558,6 @@ void render_cards(void)
 void deal_hand(void)
 {
     /* Deal five fresh cards and move to hold selection phase. */
-    uint8_t slots[CARD_COUNT] = {0, 1, 2, 3, 4};
-
     for (uint8_t i = 0; i < CARD_COUNT; i++) {
         cards[i].card = pop_deck();
         cards[i].held = false;
@@ -549,7 +565,7 @@ void deal_hand(void)
 
     show_card_faces = 1;
     state = STATE_HOLD;
-    start_reveal_sequence(slots, CARD_COUNT, 0);
+    start_reveal_sequence(all_slots, CARD_COUNT, 0);
     needs_redraw = 1;
 }
 
@@ -717,7 +733,8 @@ static void restart_if_credit_low(void)
     show_win_banner = 0;
     show_card_faces = 0;
     reveal_active = 0;
-    reveal_mask = 0x1F;
+    reveal_mask = 0;
+    start_reveal_sequence(all_slots, CARD_COUNT, 0);
     suppress_enter_ticks = 8;
 
     shuffle_deck();
@@ -736,7 +753,8 @@ static void return_to_bet_phase(void)
     show_win_banner = 0;
     show_card_faces = 0;
     reveal_active = 0;
-    reveal_mask = 0x1F;
+    reveal_mask = 0;
+    start_reveal_sequence(all_slots, CARD_COUNT, 0);
     state = STATE_BET;
     suppress_enter_ticks = 8;
     needs_redraw = 1;
@@ -828,6 +846,7 @@ void init(void)
     seed_rng_from_time();
     shuffle_deck();
     show_card_faces = 0;
+    start_reveal_sequence(all_slots, CARD_COUNT, 0);
     state = STATE_BET;
     render_cards();
     needs_redraw = 0;
