@@ -40,6 +40,7 @@ static uint8_t show_win_banner = 0;
 static uint8_t show_card_faces = 0;
 static uint8_t needs_redraw = 1;
 static uint8_t needs_hud_redraw = 0;
+static char win_banner_text[36] = "YOU HAVE WON!";
 
 /* Small entropy accumulator mixed into RNG seed values. */
 static uint16_t entropy = 1;
@@ -92,6 +93,7 @@ static void reseed_rng_for_new_hand(void);
 static void start_reveal_sequence(const uint8_t* slots, uint8_t len, uint8_t initial_mask);
 static void update_reveal_sequence(void);
 static void play_card_place_sound(void);
+static void set_win_banner_from_result(const HandResult* result);
 
 /* Card IDs are 0..51, grouped by suits in blocks of 13. */
 static uint8_t card_rank(uint8_t card)
@@ -315,7 +317,6 @@ static void clear_hud_field(uint8_t x, uint8_t y, uint8_t width)
 static void draw_hold_labels(void)
 {
     static const char hold_text[] = "HOLD";
-    static const char won_text[] = "YOU HAVE WON!";
     static const char deal_text[] = "DEAL";
     static const char draw_text[] = "DRAW";
     static const char clear_row[] = "                                    ";
@@ -333,8 +334,10 @@ static void draw_hold_labels(void)
      */
     if (state != STATE_HOLD) {
         if (show_win_banner) {
-            nprint_string(&vctx, won_text, 13, 13, hold_y);
-        } else if (state == STATE_BET) {
+            uint8_t msg_len = (uint8_t)strlen(win_banner_text);
+            uint8_t msg_x = (uint8_t)(2 + ((36 - msg_len) / 2));
+            nprint_string(&vctx, win_banner_text, msg_len, msg_x, hold_y);
+        } else if (state == STATE_BET || state == STATE_RESULT) {
             nprint_string(&vctx, deal_text, 4, 18, hold_y);
         }
         return;
@@ -522,6 +525,30 @@ HandResult evaluate_hand(const uint8_t hand[CARD_COUNT])
     return result;
 }
 
+static void set_win_banner_from_result(const HandResult* result)
+{
+    const char* combo = NULL;
+
+    switch (result->multiplier) {
+        case 250: combo = "ROYAL FLUSH"; break;
+        case 50:  combo = "STRAIGHT FLUSH"; break;
+        case 25:  combo = "FOUR OF A KIND"; break;
+        case 9:   combo = "FULL HOUSE"; break;
+        case 6:   combo = "FLUSH"; break;
+        case 4:   combo = "STRAIGHT"; break;
+        case 3:   combo = "THREE OF A KIND"; break;
+        case 2:   combo = "TWO PAIR"; break;
+        case 1:   combo = "PAIR"; break;
+        default:  combo = NULL; break;
+    }
+
+    if (combo != NULL) {
+        sprintf(win_banner_text, "%s: YOU HAVE WON!", combo);
+    } else {
+        strcpy(win_banner_text, "YOU HAVE WON!");
+    }
+}
+
 void render_table(void)
 {
     /* Static background render (called once at init). */
@@ -596,6 +623,9 @@ void draw_hand(void)
      */
     show_card_faces = 1;
     show_win_banner = (win_amount > 0);
+    if (show_win_banner) {
+        set_win_banner_from_result(&result);
+    }
     state = STATE_RESULT;
     start_reveal_sequence(slots, slot_count, keep_mask);
     suppress_enter_ticks = 8;
