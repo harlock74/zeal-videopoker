@@ -9,11 +9,15 @@
 #include <zos_vfs.h>
 #include <zos_keyboard.h>
 #include <zvb_gfx.h>
+#include <zvb_sound.h>
 #include <zgdk.h>
 
 #include "assets.h"
 #include "layout_map.h"
 #include "videopoker.h"
+
+/* Sound slot used for card-placement SFX. */
+#define CARD_SOUND 0
 
 /* Global graphics context used by ZVB drawing APIs. */
 gfx_context vctx;
@@ -40,6 +44,12 @@ static uint8_t needs_hud_redraw = 0;
 /* Small entropy accumulator mixed into RNG seed values. */
 static uint16_t entropy = 1;
 static uint8_t rng_seeded = 0;
+static uint8_t reveal_mask = 0x1F;
+static uint8_t reveal_slots[CARD_COUNT];
+static uint8_t reveal_len = 0;
+static uint8_t reveal_index = 0;
+static uint8_t reveal_cooldown = 0;
+static uint8_t reveal_active = 0;
 
 /* Snapshot of key events for one update tick. */
 typedef struct {
@@ -78,6 +88,9 @@ static const uint8_t credit_y = 17;
 static void restart_if_credit_low(void);
 static void return_to_bet_phase(void);
 static void reseed_rng_for_new_hand(void);
+static void start_reveal_sequence(const uint8_t* slots, uint8_t len, uint8_t initial_mask);
+static void update_reveal_sequence(void);
+static void play_card_place_sound(void);
 
 /* Card IDs are 0..51, grouped by suits in blocks of 13. */
 static uint8_t card_rank(uint8_t card)
@@ -510,7 +523,7 @@ void render_cards(void)
 {
     /* Draw either face cards or red backs depending on phase. */
     for (uint8_t i = 0; i < CARD_COUNT; i++) {
-        if (show_card_faces) {
+        if (show_card_faces && (reveal_mask & (uint8_t)(1U << i))) {
             load_card_tiles_to_slot(i, cards[i].card);
         } else {
             load_back_tiles_to_slot(i);
@@ -527,6 +540,8 @@ void render_cards(void)
 void deal_hand(void)
 {
     /* Deal five fresh cards and move to hold selection phase. */
+    uint8_t slots[CARD_COUNT] = {0, 1, 2, 3, 4};
+
     for (uint8_t i = 0; i < CARD_COUNT; i++) {
         cards[i].card = pop_deck();
         cards[i].held = false;
@@ -534,6 +549,7 @@ void deal_hand(void)
 
     show_card_faces = 1;
     state = STATE_HOLD;
+    start_reveal_sequence(slots, CARD_COUNT, 0);
     needs_redraw = 1;
 }
 
@@ -541,11 +557,17 @@ void draw_hand(void)
 {
     HandResult result;
     uint8_t hand[CARD_COUNT];
+    uint8_t slots[CARD_COUNT];
+    uint8_t slot_count = 0;
+    uint8_t keep_mask = 0;
 
     /* Replace only non-held cards. Held cards remain unchanged. */
     for (uint8_t i = 0; i < CARD_COUNT; i++) {
         if (!cards[i].held) {
             cards[i].card = pop_deck();
+            slots[slot_count++] = i;
+        } else {
+            keep_mask |= (uint8_t)(1U << i);
         }
         hand[i] = cards[i].card;
     }
@@ -564,6 +586,7 @@ void draw_hand(void)
     show_card_faces = 1;
     show_win_banner = (win_amount > 0);
     state = STATE_RESULT;
+    start_reveal_sequence(slots, slot_count, keep_mask);
     suppress_enter_ticks = 8;
     needs_redraw = 1;
     restart_if_credit_low();
@@ -633,6 +656,54 @@ static void reseed_rng_for_new_hand(void)
     rng_seeded = 1;
 }
 
+static void start_reveal_sequence(const uint8_t* slots, uint8_t len, uint8_t initial_mask)
+{
+    reveal_mask = initial_mask;
+    reveal_len = (len > CARD_COUNT) ? CARD_COUNT : len;
+    reveal_index = 0;
+    reveal_cooldown = 0;
+    reveal_active = (reveal_len > 0);
+
+    for (uint8_t i = 0; i < reveal_len; i++) {
+        reveal_slots[i] = slots[i];
+    }
+}
+
+static void update_reveal_sequence(void)
+{
+    if (!reveal_active) {
+        return;
+    }
+
+    if (reveal_cooldown > 0) {
+        reveal_cooldown--;
+        return;
+    }
+
+    uint8_t slot = reveal_slots[reveal_index];
+    reveal_mask |= (uint8_t)(1U << slot);
+
+    play_card_place_sound();
+
+    reveal_index++;
+    needs_redraw = 1;
+
+    if (reveal_index >= reveal_len) {
+        reveal_active = 0;
+    } else {
+        reveal_cooldown = 5;
+    }
+}
+
+static void play_card_place_sound(void)
+{
+    uint8_t jitter = (uint8_t)(rand8_quick() & 0x03);
+    Sound* tap = sound_play(CARD_SOUND, (uint16_t)(186 + jitter), 1);
+    if (tap != NULL) {
+        tap->waveform = WAV_NOISE;
+    }
+}
+
 static void restart_if_credit_low(void)
 {
     /* Restart only when bankroll is exhausted, not after ordinary losses. */
@@ -645,6 +716,8 @@ static void restart_if_credit_low(void)
     win_amount = 0;
     show_win_banner = 0;
     show_card_faces = 0;
+    reveal_active = 0;
+    reveal_mask = 0x1F;
     suppress_enter_ticks = 8;
 
     shuffle_deck();
@@ -662,6 +735,8 @@ static void return_to_bet_phase(void)
 
     show_win_banner = 0;
     show_card_faces = 0;
+    reveal_active = 0;
+    reveal_mask = 0x1F;
     state = STATE_BET;
     suppress_enter_ticks = 8;
     needs_redraw = 1;
@@ -740,6 +815,12 @@ void init(void)
         exit(1);
     }
 
+    sound_init();
+    Sound* card_sound = sound_get(CARD_SOUND);
+    if (card_sound != NULL) {
+        card_sound->waveform = WAV_NOISE;
+    }
+
     init_layout_tiles();
     load_ui_font_tiles();
     render_table();
@@ -758,6 +839,8 @@ void init(void)
 void deinit(void)
 {
     /* Restore text screen before exiting back to shell/system. */
+    sound_stop_all();
+    sound_deinit();
     ioctl(DEV_STDOUT, CMD_RESET_SCREEN, NULL);
 }
 
@@ -765,6 +848,8 @@ void update(void)
 {
     /* Game logic tick: input/state transitions only (no VRAM drawing here). */
     KeyEvents ev;
+    sound_loop();
+    update_reveal_sequence();
     poll_keys(&ev);
     entropy++;
     if (suppress_enter_ticks > 0) {
@@ -777,6 +862,9 @@ void update(void)
     }
 
     if (state == STATE_HOLD) {
+        if (reveal_active) {
+            return;
+        }
         /* Toggle holds with A/S/D/F/G; Enter performs draw. */
         for (uint8_t i = 0; i < CARD_COUNT; i++) {
             if (ev.hold_toggle[i]) {
