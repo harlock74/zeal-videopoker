@@ -36,6 +36,6 @@ find_package(ZGDK REQUIRED)
 target_link_libraries(poker PUBLIC zgdk)
 
 gif2zeal(poker FILES
-    "assets/cards_modified.gif")
+    "assets/cards.gif")
 
 zos_add_outputs(poker)

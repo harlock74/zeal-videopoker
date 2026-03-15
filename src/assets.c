@@ -88,7 +88,7 @@ gfx_error load_cards_palette(gfx_context* ctx)
     uint8_t buf[ASSET_IO_CHUNK];
     uint8_t from_color = 0;
 
-    zos_dev_t dev = open_asset_with_fallback("cards_modified.ztp");
+    zos_dev_t dev = open_asset_with_fallback("cards.ztp");
     if (dev < 0) {
         return GFX_FAILURE;
     }
@@ -120,7 +120,7 @@ gfx_error load_source_tile(gfx_context* ctx, uint16_t src_gid, uint16_t dst_from
     uint16_t src_index = (uint16_t)(src_gid - 1U);
     int32_t src_offset = (int32_t)src_index * TILE_BYTES;
 
-    return load_file_chunked_to_vram(ctx, "cards_modified.zts", src_offset, TILE_BYTES, dst_from_byte);
+    return load_file_chunked_to_vram(ctx, "cards.zts", src_offset, TILE_BYTES, dst_from_byte);
 }
 
 gfx_error load_card_tiles(gfx_context* ctx, uint8_t card, uint16_t dst_from_byte)
@@ -140,7 +140,7 @@ gfx_error load_card_tiles(gfx_context* ctx, uint8_t card, uint16_t dst_from_byte
         uint16_t row_bytes = (uint16_t)(CARD_TILE_W * TILE_BYTES);
         uint16_t row_dst = (uint16_t)(dst_from_byte + (row * CARD_TILE_W * TILE_BYTES));
 
-        if (load_file_chunked_to_vram(ctx, "cards_modified.zts", src_offset, row_bytes, row_dst) != GFX_SUCCESS) {
+        if (load_file_chunked_to_vram(ctx, "cards.zts", src_offset, row_bytes, row_dst) != GFX_SUCCESS) {
             return GFX_FAILURE;
         }
     }
