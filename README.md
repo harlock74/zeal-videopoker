@@ -17,7 +17,8 @@ Video Poker for Zeal 8-bit Computer.
    - Only non-held cards are replaced.
    - Final hand is evaluated against the pay table.
    - `WIN` is computed as `multiplier * bet`.
-   - `CREDIT` is updated and `YOU HAVE WON!` is shown on winning hands.
+   - `CREDIT` is updated and the banner shows the exact winning combo:
+     - Example: `STRAIGHT X4: YOU HAVE WON!`
 4. **Back to bet**
    - Press `ENTER` or `SPACE` to continue.
    - Card backs are shown again, ready for next hand.
@@ -56,6 +57,9 @@ Main gameplay is in `src/videopoker.c`.
 - `evaluate_hand()`: rank detection and multiplier selection
 - `render_layout()` / `render_cards()`: map/card/HUD/banner rendering
 - `shuffle_deck()` / `pop_deck()`: deck management (Fisher-Yates shuffle)
+- `start_reveal_sequence()` / `update_reveal_sequence()`: one-by-one card reveal timing
+- `play_card_place_sound()`: per-card SFX trigger during reveals
+- `set_win_banner_from_result()`: builds combo-specific win banner text
 
 Supporting files:
 
@@ -68,6 +72,34 @@ Supporting files:
 - Video mode: `ZVB_CTRL_VID_MODE_GFX_640_8BIT`
 - Each card is rendered as `3x4` tiles
 - UI layout is read from `cards.tmx` and generated into `layout_map.h`
+
+## Audio Implementation
+
+The game uses ZGDK/ZVB sound APIs and plays a short SFX every time a card is
+placed (both card backs and face cards) during reveal animations.
+
+Audio lifecycle in code:
+
+- `sound_init()` in `init()`
+- `sound_loop()` once per frame in `update()`
+- `sound_play(...)` in `play_card_place_sound()`
+- `sound_stop_all()` + `sound_deinit()` in `deinit()`
+
+### Current tunable audio parameters
+
+Defined near the top of `src/videopoker.c`:
+
+- `CARD_SFX_WAVEFORM`: waveform (`WAV_SQUARE`, `WAV_TRIANGLE`, `WAV_SAWTOOTH`, `WAV_NOISE`)
+- `CARD_SFX_BASE_FREQ`: base pitch/frequency passed to `sound_play`
+- `CARD_SFX_JITTER_MASK`: random variation mask for humanized repeated taps
+- `CARD_SFX_DURATION`: sound length
+- `CARD_REVEAL_DELAY`: timing between consecutive cards in reveal sequence
+
+In practice:
+
+- Lower `CARD_SFX_BASE_FREQ` and slightly longer `CARD_SFX_DURATION` feel more like a soft desk tap.
+- Higher `CARD_REVEAL_DELAY` makes dealing slower and more deliberate.
+- Larger `CARD_SFX_JITTER_MASK` adds more variation between card hits.
 
 ## Accreditation
 
