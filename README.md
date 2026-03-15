@@ -43,12 +43,6 @@ If credits reach `0`, the game resets bankroll and returns to the bet phase.
 - `2`: Two Pair
 - `1`: Pair
 
-## Assets
-
-- `assets/1.2 Poker cards_modified.gif`: original source you provided
-- `assets/cards_modified.gif`: tileset/palette source used by build tools
-- `assets/cards.tmx`: layout source for UI/table map and placeholders
-
 ## Code Structure
 
 Main gameplay is in `src/videopoker.c`.
