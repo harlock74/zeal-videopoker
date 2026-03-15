@@ -18,6 +18,12 @@
 
 /* Sound slot used for card-placement SFX. */
 #define CARD_SOUND 0
+/* Tuned for a softer "card on poker desk" feel. */
+#define CARD_SFX_BASE_FREQ 10
+#define CARD_SFX_JITTER_MASK 0x07
+#define CARD_SFX_DURATION 2
+#define CARD_REVEAL_DELAY 4
+#define CARD_SFX_WAVEFORM WAV_SAWTOOTH
 
 /* Global graphics context used by ZVB drawing APIs. */
 gfx_context vctx;
@@ -543,7 +549,7 @@ static void set_win_banner_from_result(const HandResult* result)
     }
 
     if (combo != NULL) {
-        sprintf(win_banner_text, "%s: YOU HAVE WON!", combo);
+        sprintf(win_banner_text, "%s X%u: YOU HAVE WON!", combo, result->multiplier);
     } else {
         strcpy(win_banner_text, "YOU HAVE WON!");
     }
@@ -732,16 +738,21 @@ static void update_reveal_sequence(void)
     if (reveal_index >= reveal_len) {
         reveal_active = 0;
     } else {
-        reveal_cooldown = 5;
+        reveal_cooldown = CARD_REVEAL_DELAY;
     }
 }
 
 static void play_card_place_sound(void)
 {
-    uint8_t jitter = (uint8_t)(rand8_quick() & 0x03);
-    Sound* tap = sound_play(CARD_SOUND, (uint16_t)(186 + jitter), 1);
+    uint8_t jitter = (uint8_t)(rand8_quick() & CARD_SFX_JITTER_MASK);
+    Sound* tap = sound_get(CARD_SOUND);
     if (tap != NULL) {
-        tap->waveform = WAV_NOISE;
+        tap->waveform = CARD_SFX_WAVEFORM;
+    }
+
+    tap = sound_play(CARD_SOUND, (uint16_t)(CARD_SFX_BASE_FREQ + jitter), CARD_SFX_DURATION);
+    if (tap != NULL) {
+        tap->waveform = CARD_SFX_WAVEFORM;
     }
 }
 
@@ -861,7 +872,7 @@ void init(void)
     sound_init();
     Sound* card_sound = sound_get(CARD_SOUND);
     if (card_sound != NULL) {
-        card_sound->waveform = WAV_NOISE;
+        card_sound->waveform = CARD_SFX_WAVEFORM;
     }
 
     init_layout_tiles();
