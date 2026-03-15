@@ -277,12 +277,9 @@ static void place_card_slot(uint8_t slot)
 static void clear_card_slot(uint8_t slot)
 {
     uint8_t x0 = slot_x[slot];
-    /* Use the tile immediately left of the slot as the table background fill. */
-    uint16_t bg_gid = kLayoutGids[(slot_y * LAYOUT_W) + (x0 - 1)];
-    uint8_t bg_tile = map_gid_to_tile(bg_gid);
     for (uint8_t row = 0; row < SRC_CARD_H; row++) {
         for (uint8_t col = 0; col < SRC_CARD_W; col++) {
-            gfx_tilemap_place(&vctx, bg_tile, TILEMAP_LAYER, (uint8_t)(x0 + col), (uint8_t)(slot_y + row));
+            restore_map_cell((uint8_t)(x0 + col), (uint8_t)(slot_y + row));
         }
     }
 }
