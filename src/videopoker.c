@@ -119,11 +119,13 @@ static uint8_t map_gid_to_tile(uint16_t gid)
 
 static void load_ui_font_tiles(void)
 {
-    /* Frame tile used to highlight held cards */
-    load_source_tile(&vctx, 1007, (uint16_t)HOLD_FRAME_TILE * TILE_SIZE);
+    uint16_t space_gid = kLayoutGids[(hold_y * LAYOUT_W) + 2];
+
+    /* Frame tile used to highlight held cards (center back tile, no edge stripes) */
+    load_source_tile(&vctx, 1005, (uint16_t)HOLD_FRAME_TILE * TILE_SIZE);
 
     /* Space/background tile used to clear text areas cleanly. */
-    load_source_tile(&vctx, 981, (uint16_t)FONT_SPACE_TILE * TILE_SIZE);
+    load_source_tile(&vctx, space_gid, (uint16_t)FONT_SPACE_TILE * TILE_SIZE);
 
     /* Digits and A-Z are loaded from your font area in the tileset. */
     for (uint8_t i = 0; i < 10; i++) {
@@ -163,13 +165,14 @@ static void draw_hold_frames(void)
 {
     /* Draw/remove a 1-tile border around each card slot based on hold flag. */
     for (uint8_t i = 0; i < CARD_COUNT; i++) {
+        uint8_t show_frame = (state == STATE_HOLD) && cards[i].held;
         uint8_t x0 = (uint8_t)(slot_x[i] - 1);
         uint8_t y0 = (uint8_t)(slot_y - 1);
         uint8_t x1 = (uint8_t)(slot_x[i] + SRC_CARD_W);
         uint8_t y1 = (uint8_t)(slot_y + SRC_CARD_H);
 
         for (uint8_t x = x0; x <= x1; x++) {
-            if (cards[i].held) {
+            if (show_frame) {
                 gfx_tilemap_place(&vctx, HOLD_FRAME_TILE, TILEMAP_LAYER, x, y0);
                 gfx_tilemap_place(&vctx, HOLD_FRAME_TILE, TILEMAP_LAYER, x, y1);
             } else {
@@ -179,7 +182,7 @@ static void draw_hold_frames(void)
         }
 
         for (uint8_t y = (uint8_t)(y0 + 1); y < y1; y++) {
-            if (cards[i].held) {
+            if (show_frame) {
                 gfx_tilemap_place(&vctx, HOLD_FRAME_TILE, TILEMAP_LAYER, x0, y);
                 gfx_tilemap_place(&vctx, HOLD_FRAME_TILE, TILEMAP_LAYER, x1, y);
             } else {
@@ -287,28 +290,25 @@ static void clear_card_slot(uint8_t slot)
 static void restore_hold_background(uint8_t slot)
 {
     /* Keep helper in case per-slot text clears are needed again. */
-    uint8_t bg = map_gid_to_tile(981);
     for (uint8_t col = 0; col < 4; col++) {
         uint8_t x = (uint8_t)(hold_x[slot] + col);
-        gfx_tilemap_place(&vctx, bg, TILEMAP_LAYER, x, hold_y);
+        restore_map_cell(x, hold_y);
     }
 }
 
 static void clear_bottom_row(void)
 {
     /* Clears the action banner/hold row on tilemap layer 0. */
-    uint8_t bg = map_gid_to_tile(981);
     for (uint8_t x = 2; x < 38; x++) {
-        gfx_tilemap_place(&vctx, bg, TILEMAP_LAYER, x, hold_y);
+        restore_map_cell(x, hold_y);
     }
 }
 
 static void clear_hud_field(uint8_t x, uint8_t y, uint8_t width)
 {
     /* Clears one numeric HUD field before printing a new value. */
-    uint8_t bg = map_gid_to_tile(981);
     for (uint8_t i = 0; i < width; i++) {
-        gfx_tilemap_place(&vctx, bg, TILEMAP_LAYER, (uint8_t)(x + i), y);
+        restore_map_cell((uint8_t)(x + i), y);
     }
 }
 
@@ -426,21 +426,19 @@ static void draw_hud_values(void)
     char bet_buf[6];
     char win_buf[6];
     char credit_buf[6];
-    uint8_t bg = map_gid_to_tile(981);
-
     /* Always print fixed-width 3 digits so HUD text does not jitter. */
-    sprintf(bet_buf, "%03u ", bet);
-    sprintf(win_buf, "%03u ", win_amount);
-    sprintf(credit_buf, "%03u ", credits);
+    sprintf(bet_buf, "%03u", bet);
+    sprintf(win_buf, "%03u", win_amount);
+    sprintf(credit_buf, "%03u", credits);
 
     clear_hud_field(bet_x, bet_y, 4);
     clear_hud_field(win_x, win_y, 4);
     clear_hud_field(credit_x, credit_y, 4);
-    gfx_tilemap_place(&vctx, bg, TILEMAP_LAYER, (uint8_t)(credit_x - 1), credit_y);
+    restore_map_cell((uint8_t)(credit_x - 1), credit_y);
 
-    nprint_string(&vctx, bet_buf, 4, bet_x, bet_y);
-    nprint_string(&vctx, win_buf, 4, win_x, win_y);
-    nprint_string(&vctx, credit_buf, 4, credit_x, credit_y);
+    nprint_string(&vctx, bet_buf, 3, bet_x, bet_y);
+    nprint_string(&vctx, win_buf, 3, win_x, win_y);
+    nprint_string(&vctx, credit_buf, 3, credit_x, credit_y);
 }
 
 HandResult evaluate_hand(const uint8_t hand[CARD_COUNT])
