@@ -2,33 +2,87 @@
 
 Video Poker for Zeal 8-bit Computer.
 
+## Game Flow
+
+1. **Bet phase (`DEAL`)**
+   - Adjust bet with `UP` / `DOWN`.
+   - Press `ENTER` or `SPACE` to start the hand.
+   - Selected bet is subtracted from credits.
+2. **Hold phase (`DRAW`)**
+   - Five cards are dealt from a shuffled 52-card deck.
+   - Toggle hold with `A/S/D/F/G` (cards 1 to 5).
+   - Held cards are marked with `HOLD` and a visual frame.
+   - Press `ENTER` to draw replacements.
+3. **Result phase**
+   - Only non-held cards are replaced.
+   - Final hand is evaluated against the pay table.
+   - `WIN` is computed as `multiplier * bet`.
+   - `CREDIT` is updated and `YOU HAVE WON!` is shown on winning hands.
+4. **Back to bet**
+   - Press `ENTER` or `SPACE` to continue.
+   - Card backs are shown again, ready for next hand.
+
+If credits reach `0`, the game resets bankroll and returns to the bet phase.
+
 ## Controls
 
-- `UP` / `DOWN`: change bet on bet screen
-- `A`,`S`,`D`,`F`,`G`: toggle hold on/off selected card
-- `SPACE` or `ENTER`: deal / draw / continue
-- `SELECT`: quit
+- `UP` / `DOWN`: increase/decrease bet (bet phase)
+- `A` / `S` / `D` / `F` / `G`: hold/unhold cards 1..5 (hold phase)
+- `ENTER` or `SPACE`: deal, draw, continue
+- `'`: quit
 
-## Assets used
+## Hand Ranking and Payout
 
-- `assets/1.2 Poker cards_modified.gif`: see accreditations below
-- `assets/cards_modified.gif`: single source used to generate shared `.ztp/.zts` palette+tiles
-- `assets/cards.tmx`: Tiled layout
+- `250`: Royal Flush
+- `50`: Straight Flush
+- `25`: Four of a Kind
+- `9`: Full House
+- `6`: Flush
+- `4`: Straight
+- `3`: Three of a Kind
+- `2`: Two Pair
+- `1`: Pair
 
-## Rendering
+## Assets
 
-- Each dealt card is rendered as `3x4` tiles.
-- Five card slots are mapped to the 5 placeholder regions from `cards.tmx`.
-- Fisher-Yates shuffling is used on a 52-card deck each deal.
-- Palette and tiles are streamed at runtime from `assets/cards_modified.ztp/.zts` in small chunks with `gfx_palette_load` / `gfx_tileset_load`.
+- `assets/1.2 Poker cards_modified.gif`: original source you provided
+- `assets/cards_modified.gif`: tileset/palette source used by build tools
+- `assets/cards.tmx`: layout source for UI/table map and placeholders
+
+## Code Structure
+
+Main gameplay is in `src/videopoker.c`.
+
+- `init()`: input/video init, asset loading, map/font setup, first screen
+- `update()`: state machine and controls (`BET`, `HOLD`, `RESULT`)
+- `draw()`: full or partial redraw synchronized with VBlank
+- `start_new_round()`: deduct bet, reseed RNG, shuffle, deal
+- `deal_hand()`: initial 5-card deal
+- `draw_hand()`: replace non-held cards, evaluate result, apply payout
+- `evaluate_hand()`: rank detection and multiplier selection
+- `render_layout()` / `render_cards()`: map/card/HUD/banner rendering
+- `shuffle_deck()` / `pop_deck()`: deck management (Fisher-Yates shuffle)
+
+Supporting files:
+
+- `src/assets.c` / `src/assets.h`: palette/tile loading helpers
+- `src/layout_map.h`: generated TMX map header
+- `src/videopoker.h`: gameplay and rendering constants
+
+## Rendering Notes
+
+- Video mode: `ZVB_CTRL_VID_MODE_GFX_640_8BIT`
+- Each card is rendered as `3x4` tiles
+- UI layout is read from `cards.tmx` and generated into `layout_map.h`
 
 ## Accreditation
+
 Author: Zingot Games  
-License: CC-BY 4.0
-https://opengameart.org/content/bitmap-font-pack
+License: CC-BY 4.0  
+https://opengameart.org/content/bitmap-font-pack  
 A few changes to the original assets have been made including the color palette.
 
 Author: (Pixel) Poker Cards  
-License: CC-BY 4.0
-https://ivoryred.itch.io/pixel-poker-cards
+License: CC-BY 4.0  
+https://ivoryred.itch.io/pixel-poker-cards  
 A few changes to the original assets have been made including the color palette.

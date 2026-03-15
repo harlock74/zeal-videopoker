@@ -22,9 +22,6 @@ gfx_context vctx;
 static PokerCard cards[CARD_COUNT];
 static uint8_t deck[DECK_SIZE];
 static uint8_t deck_pos = 0;
-/* Bankroll at startup and after game-over reset. */
-#define INITIAL_CREDITS 5
-#define RESET_CREDITS 5
 
 /* High-level game flow: bet -> hold/draw -> result -> bet. */
 static GameState state = STATE_BET;
@@ -795,12 +792,14 @@ void update(void)
 
     if (state == STATE_RESULT) {
         /* RESULT waits for confirmation before returning to BET phase. */
-        if (show_win_banner && (ev.up || ev.down || ev.enter || ev.space)) {
-            show_win_banner = 0;
-            needs_hud_redraw = 1;
-        }
-        if ((ev.enter || ev.space) && suppress_enter_ticks == 0) {
-            return_to_bet_phase();
+        if (suppress_enter_ticks == 0) {
+            if (show_win_banner && (ev.up || ev.down || ev.enter || ev.space)) {
+                show_win_banner = 0;
+                needs_hud_redraw = 1;
+            }
+            if (ev.enter || ev.space) {
+                return_to_bet_phase();
+            }
         }
         return;
     }

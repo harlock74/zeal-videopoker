@@ -13,6 +13,10 @@
 #define DECK_SIZE 52
 #define MAX_BET 5
 
+/* Game economy config */
+#define INITIAL_CREDITS 5
+#define RESET_CREDITS 5
+
 #define SRC_CARD_W 3
 #define SRC_CARD_H 4
 #define DST_TILE_BASE 192
