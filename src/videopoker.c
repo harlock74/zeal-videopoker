@@ -130,27 +130,27 @@ static void load_ui_font_tiles(void)
     uint16_t space_gid = kLayoutGids[(hold_y * LAYOUT_W) + 2];
 
     /* Frame tile used to highlight held cards (center back tile, no edge stripes) */
-    load_source_tile(&vctx, 1005, (uint16_t)HOLD_FRAME_TILE * TILE_SIZE);
+    load_source_tile(&vctx, 665, (uint16_t)HOLD_FRAME_TILE * TILE_SIZE);
 
     /* Space/background tile used to clear text areas cleanly. */
     load_source_tile(&vctx, space_gid, (uint16_t)FONT_SPACE_TILE * TILE_SIZE);
 
     /* Digits and A-Z are loaded from your font area in the tileset. */
     for (uint8_t i = 0; i < 10; i++) {
-        load_source_tile(&vctx, (uint16_t)(1181 + i), (uint16_t)(FONT_DIGIT_TILE + i) * TILE_SIZE);
+        load_source_tile(&vctx, (uint16_t)(781 + i), (uint16_t)(FONT_DIGIT_TILE + i) * TILE_SIZE);
     }
 
     for (uint8_t i = 0; i < 13; i++) {
-        load_source_tile(&vctx, (uint16_t)(1191 + i), (uint16_t)(FONT_ALPHA_A_TILE + i) * TILE_SIZE);
+        load_source_tile(&vctx, (uint16_t)(791 + i), (uint16_t)(FONT_ALPHA_A_TILE + i) * TILE_SIZE);
     }
 
     for (uint8_t i = 0; i < 13; i++) {
-        load_source_tile(&vctx, (uint16_t)(1204 + i), (uint16_t)(FONT_ALPHA_N_TILE + i) * TILE_SIZE);
+        load_source_tile(&vctx, (uint16_t)(804 + i), (uint16_t)(FONT_ALPHA_N_TILE + i) * TILE_SIZE);
     }
 
     /* Punctuation tiles follow Z in the custom font strip. */
-    load_source_tile(&vctx, 1217, (uint16_t)FONT_COLON_TILE * TILE_SIZE);
-    load_source_tile(&vctx, 1218, (uint16_t)FONT_EXCL_TILE * TILE_SIZE);
+    load_source_tile(&vctx, 817, (uint16_t)FONT_COLON_TILE * TILE_SIZE);
+    load_source_tile(&vctx, 818, (uint16_t)FONT_EXCL_TILE * TILE_SIZE);
 
     ascii_map(' ', 1, FONT_SPACE_TILE);
     ascii_map('0', 10, FONT_DIGIT_TILE);    // 0-9
@@ -256,10 +256,10 @@ static void load_back_tiles_to_slot(uint8_t slot)
 {
     /* Fixed 3x4 red-back card from your tileset (GIDs from cards.tmx layout). */
     static const uint16_t back_gids[SRC_CARD_H][SRC_CARD_W] = {
-        {945, 946, 947},
-        {1004, 1005, 1006},
-        {1063, 1064, 1065},
-        {1122, 1123, 1124},
+        {625, 626, 627},
+        {664, 665, 666},
+        {703, 704, 705},
+        {742, 743, 744},
     };
     uint8_t dst_base_tile = (uint8_t)(DST_TILE_BASE + (slot * (SRC_CARD_W * SRC_CARD_H)));
 

@@ -8,7 +8,7 @@
 
 #define ASSET_IO_CHUNK 128
 #define TILE_BYTES 256
-#define CARD_TILE_COLUMNS 59
+#define CARD_TILE_COLUMNS 39
 #define CARD_TILE_W 3
 #define CARD_TILE_H 4
 
