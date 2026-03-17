@@ -19,9 +19,9 @@
 /* Sound slot used for card-placement SFX. */
 #define CARD_SOUND 0
 /* Tuned for a softer "card on poker desk" feel. */
-#define CARD_SFX_BASE_FREQ 10
-#define CARD_SFX_JITTER_MASK 0x07
-#define CARD_SFX_DURATION 2
+#define CARD_SFX_BASE_FREQ 50
+#define CARD_SFX_JITTER_MASK 0x03
+#define CARD_SFX_DURATION 1
 #define CARD_REVEAL_DELAY 4
 #define CARD_SFX_WAVEFORM WAV_SAWTOOTH
 
@@ -57,6 +57,8 @@ static uint8_t reveal_len = 0;
 static uint8_t reveal_index = 0;
 static uint8_t reveal_cooldown = 0;
 static uint8_t reveal_active = 0;
+/* Per-slot one-shot SFX trigger, consumed in render_cards() when slot is drawn. */
+static uint8_t reveal_sfx_pending_mask = 0;
 
 /* Snapshot of key events for one update tick. */
 typedef struct {
@@ -68,8 +70,21 @@ typedef struct {
     uint8_t hold_toggle[CARD_COUNT];
 } KeyEvents;
 
+/* Tracks what card visuals are already loaded into each slot's VRAM tile block. */
+typedef struct {
+    uint8_t valid;
+    uint8_t face_up;
+    uint8_t card;
+} SlotVisualCache;
+
 /* Debounce timer to avoid Enter/Space double-triggering state transitions. */
 static uint8_t suppress_enter_ticks = 0;
+/* Cache of currently uploaded visuals for each card slot. */
+static SlotVisualCache slot_cache[CARD_COUNT];
+/* Per-slot render invalidation mask for incremental redraws. */
+static uint8_t dirty_slots[CARD_COUNT];
+/* Forces one pass over all slots (startup/phase reset). */
+static uint8_t full_redraw = 1;
 
 /* Map GID -> runtime tile ID remap generated from layout_map.h usage. */
 static uint16_t mapped_gids[MAP_TILE_CAPACITY];
@@ -100,6 +115,10 @@ static void start_reveal_sequence(const uint8_t* slots, uint8_t len, uint8_t ini
 static void update_reveal_sequence(void);
 static void play_card_place_sound(void);
 static void set_win_banner_from_result(const HandResult* result);
+static void invalidate_slot_cache(void);
+static void ensure_slot_tiles(uint8_t slot, uint8_t show_face, uint8_t card);
+static void mark_all_slots_dirty(void);
+static void mark_slot_dirty(uint8_t slot);
 
 /* Card IDs are 0..51, grouped by suits in blocks of 13. */
 static uint8_t card_rank(uint8_t card)
@@ -268,6 +287,55 @@ static void load_back_tiles_to_slot(uint8_t slot)
             uint8_t dst_tile = (uint8_t)(dst_base_tile + (row * SRC_CARD_W) + col);
             load_source_tile(&vctx, back_gids[row][col], (uint16_t)dst_tile * TILE_SIZE);
         }
+    }
+}
+
+static void invalidate_slot_cache(void)
+{
+    /* VRAM slot contents are unknown after init/reset; force first upload on demand. */
+    for (uint8_t i = 0; i < CARD_COUNT; i++) {
+        slot_cache[i].valid = 0;
+        slot_cache[i].face_up = 0;
+        slot_cache[i].card = 0;
+    }
+}
+
+static void ensure_slot_tiles(uint8_t slot, uint8_t show_face, uint8_t card)
+{
+    SlotVisualCache* cache = &slot_cache[slot];
+
+    if (show_face) {
+        /* Upload face art only when slot content or mode changed. */
+        if (!cache->valid || !cache->face_up || cache->card != card) {
+            load_card_tiles_to_slot(slot, card);
+            cache->valid = 1;
+            cache->face_up = 1;
+            cache->card = card;
+        }
+    } else {
+        /* Upload back art only on transition from face/invalid to back. */
+        if (!cache->valid || cache->face_up) {
+            load_back_tiles_to_slot(slot);
+            cache->valid = 1;
+            cache->face_up = 0;
+            cache->card = 0;
+        }
+    }
+}
+
+static void mark_all_slots_dirty(void)
+{
+    /* Used when phase/layout changes can affect all card slots at once. */
+    for (uint8_t i = 0; i < CARD_COUNT; i++) {
+        dirty_slots[i] = 1;
+    }
+    full_redraw = 1;
+}
+
+static void mark_slot_dirty(uint8_t slot)
+{
+    if (slot < CARD_COUNT) {
+        dirty_slots[slot] = 1;
     }
 }
 
@@ -563,19 +631,31 @@ void render_table(void)
 
 void render_cards(void)
 {
-    /* Draw either face cards or red backs depending on phase. */
+    /*
+     * Draw only changed slots:
+     * - avoids unnecessary tilemap writes
+     * - combined with ensure_slot_tiles() avoids redundant VRAM uploads
+     */
     for (uint8_t i = 0; i < CARD_COUNT; i++) {
+        if (!full_redraw && !dirty_slots[i]) {
+            continue;
+        }
+
         if (reveal_mask & (uint8_t)(1U << i)) {
-            if (show_card_faces) {
-                load_card_tiles_to_slot(i, cards[i].card);
-            } else {
-                load_back_tiles_to_slot(i);
-            }
+            ensure_slot_tiles(i, show_card_faces, cards[i].card);
             place_card_slot(i);
+            /* Play card SFX exactly when the card is visually placed (sync fix). */
+            if (reveal_sfx_pending_mask & (uint8_t)(1U << i)) {
+                play_card_place_sound();
+                reveal_sfx_pending_mask &= (uint8_t)~(1U << i);
+            }
         } else {
             clear_card_slot(i);
         }
+
+        dirty_slots[i] = 0;
     }
+    full_redraw = 0;
 
     /* Dynamic overlays are redrawn every time cards/HUD state changes. */
     draw_hold_frames();
@@ -589,6 +669,7 @@ void deal_hand(void)
     for (uint8_t i = 0; i < CARD_COUNT; i++) {
         cards[i].card = pop_deck();
         cards[i].held = false;
+        mark_slot_dirty(i);
     }
 
     show_card_faces = 1;
@@ -610,6 +691,7 @@ void draw_hand(void)
         if (!cards[i].held) {
             cards[i].card = pop_deck();
             slots[slot_count++] = i;
+            mark_slot_dirty(i);
         } else {
             keep_mask |= (uint8_t)(1U << i);
         }
@@ -710,6 +792,9 @@ static void start_reveal_sequence(const uint8_t* slots, uint8_t len, uint8_t ini
     reveal_index = 0;
     reveal_cooldown = 0;
     reveal_active = (reveal_len > 0);
+    reveal_sfx_pending_mask = 0;
+    /* Visibility masks changed; redraw card region conservatively. */
+    mark_all_slots_dirty();
 
     for (uint8_t i = 0; i < reveal_len; i++) {
         reveal_slots[i] = slots[i];
@@ -729,8 +814,10 @@ static void update_reveal_sequence(void)
 
     uint8_t slot = reveal_slots[reveal_index];
     reveal_mask |= (uint8_t)(1U << slot);
-
-    play_card_place_sound();
+    /* Reveal animation updates one slot at a time. */
+    mark_slot_dirty(slot);
+    /* Defer SFX until render pass actually places this card on screen. */
+    reveal_sfx_pending_mask |= (uint8_t)(1U << slot);
 
     reveal_index++;
     needs_redraw = 1;
@@ -771,6 +858,7 @@ static void restart_if_credit_low(void)
     reveal_active = 0;
     reveal_mask = 0;
     start_reveal_sequence(all_slots, CARD_COUNT, 0);
+    mark_all_slots_dirty();
     suppress_enter_ticks = 8;
 
     shuffle_deck();
@@ -791,6 +879,7 @@ static void return_to_bet_phase(void)
     reveal_active = 0;
     reveal_mask = 0;
     start_reveal_sequence(all_slots, CARD_COUNT, 0);
+    mark_all_slots_dirty();
     state = STATE_BET;
     suppress_enter_ticks = 8;
     needs_redraw = 1;
@@ -878,6 +967,8 @@ void init(void)
     init_layout_tiles();
     load_ui_font_tiles();
     render_table();
+    invalidate_slot_cache();
+    mark_all_slots_dirty();
 
     seed_rng_from_time();
     shuffle_deck();
@@ -896,6 +987,8 @@ void deinit(void)
     /* Restore text screen before exiting back to shell/system. */
     sound_stop_all();
     sound_deinit();
+    /* Close persistent asset streams opened by assets.c optimization. */
+    assets_shutdown();
     ioctl(DEV_STDOUT, CMD_RESET_SCREEN, NULL);
 }
 

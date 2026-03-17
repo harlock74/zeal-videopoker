@@ -60,6 +60,8 @@ Main gameplay is in `src/videopoker.c`.
 - `start_reveal_sequence()` / `update_reveal_sequence()`: one-by-one card reveal timing
 - `play_card_place_sound()`: per-card SFX trigger during reveals
 - `set_win_banner_from_result()`: builds combo-specific win banner text
+- `ensure_slot_tiles()`: uploads slot graphics only when card/back content changes
+- `mark_slot_dirty()` / `mark_all_slots_dirty()`: incremental slot redraw control
 
 Supporting files:
 
@@ -85,6 +87,20 @@ Audio lifecycle in code:
 - `sound_play(...)` in `play_card_place_sound()`
 - `sound_stop_all()` + `sound_deinit()` in `deinit()`
 
+Audio sync fix:
+
+- Reveal logic now marks a per-slot pending SFX flag.
+- The SFX is triggered in `render_cards()` exactly when the corresponding slot is actually placed.
+- This keeps audio and visual card placement aligned on real hardware timing.
+
+Current hardware-tuned defaults:
+
+- `CARD_SFX_WAVEFORM = WAV_SAWTOOTH`
+- `CARD_SFX_BASE_FREQ = 148`
+- `CARD_SFX_JITTER_MASK = 0x03`
+- `CARD_SFX_DURATION = 1`
+- `CARD_REVEAL_DELAY = 4`
+
 ### Current tunable audio parameters
 
 Defined near the top of `src/videopoker.c`:
@@ -100,6 +116,23 @@ In practice:
 - Lower `CARD_SFX_BASE_FREQ` and slightly longer `CARD_SFX_DURATION` feel more like a soft desk tap.
 - Higher `CARD_REVEAL_DELAY` makes dealing slower and more deliberate.
 - Larger `CARD_SFX_JITTER_MASK` adds more variation between card hits.
+
+## Performance Optimizations (Real Hardware)
+
+The game now includes three targeted optimizations for Zeal hardware:
+
+1. **Slot visual caching (Step 1)**
+   - `SlotVisualCache` tracks what is already loaded in each card slot.
+   - `ensure_slot_tiles()` prevents redundant re-upload of unchanged face/back graphics.
+
+2. **Per-slot dirty rendering (Step 2)**
+   - `dirty_slots[]` + `full_redraw` allow incremental card redraw.
+   - Only changed slots are processed during reveal/deal/draw transitions.
+
+3. **Persistent asset stream reuse (Step 3)**
+   - `assets.c` keeps `cards.zts` stream open and tracks current offset.
+   - This avoids repeated `open/close/seek` overhead for each tile load.
+   - `assets_shutdown()` closes the stream in `deinit()`.
 
 ## Accreditation
 
