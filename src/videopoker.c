@@ -19,7 +19,7 @@
 /* Sound slot used for card-placement SFX. */
 #define CARD_SOUND 0
 /* Tuned for a softer "card on poker desk" feel. */
-#define CARD_SFX_BASE_FREQ 50
+#define CARD_SFX_BASE_FREQ 10
 #define CARD_SFX_JITTER_MASK 0x03
 #define CARD_SFX_DURATION 1
 #define CARD_REVEAL_DELAY 4
@@ -147,29 +147,34 @@ static uint8_t map_gid_to_tile(uint16_t gid)
 static void load_ui_font_tiles(void)
 {
     uint16_t space_gid = kLayoutGids[(hold_y * LAYOUT_W) + 2];
+    const uint16_t digit_gid_base = 165;
+    const uint16_t alpha_a_gid_base = 175;
+    const uint16_t alpha_n_gid_base = 188;
+    const uint16_t colon_gid = 201;
+    const uint16_t excl_gid = 202;
 
-    /* Frame tile used to highlight held cards (center back tile, no edge stripes) */
-    load_source_tile(&vctx, 665, (uint16_t)HOLD_FRAME_TILE * TILE_SIZE);
+    /* Frame tile used to highlight held cards (green suit-symbol tile). */
+    load_source_tile(&vctx, 105, (uint16_t)HOLD_FRAME_TILE * TILE_SIZE);
 
     /* Space/background tile used to clear text areas cleanly. */
     load_source_tile(&vctx, space_gid, (uint16_t)FONT_SPACE_TILE * TILE_SIZE);
 
-    /* Digits and A-Z are loaded from your font area in the tileset. */
+    /* Digits and A-Z are loaded from your font strip row in cards.gif. */
     for (uint8_t i = 0; i < 10; i++) {
-        load_source_tile(&vctx, (uint16_t)(781 + i), (uint16_t)(FONT_DIGIT_TILE + i) * TILE_SIZE);
+        load_source_tile(&vctx, (uint16_t)(digit_gid_base + i), (uint16_t)(FONT_DIGIT_TILE + i) * TILE_SIZE);
     }
 
     for (uint8_t i = 0; i < 13; i++) {
-        load_source_tile(&vctx, (uint16_t)(791 + i), (uint16_t)(FONT_ALPHA_A_TILE + i) * TILE_SIZE);
+        load_source_tile(&vctx, (uint16_t)(alpha_a_gid_base + i), (uint16_t)(FONT_ALPHA_A_TILE + i) * TILE_SIZE);
     }
 
     for (uint8_t i = 0; i < 13; i++) {
-        load_source_tile(&vctx, (uint16_t)(804 + i), (uint16_t)(FONT_ALPHA_N_TILE + i) * TILE_SIZE);
+        load_source_tile(&vctx, (uint16_t)(alpha_n_gid_base + i), (uint16_t)(FONT_ALPHA_N_TILE + i) * TILE_SIZE);
     }
 
     /* Punctuation tiles follow Z in the custom font strip. */
-    load_source_tile(&vctx, 817, (uint16_t)FONT_COLON_TILE * TILE_SIZE);
-    load_source_tile(&vctx, 818, (uint16_t)FONT_EXCL_TILE * TILE_SIZE);
+    load_source_tile(&vctx, colon_gid, (uint16_t)FONT_COLON_TILE * TILE_SIZE);
+    load_source_tile(&vctx, excl_gid, (uint16_t)FONT_EXCL_TILE * TILE_SIZE);
 
     ascii_map(' ', 1, FONT_SPACE_TILE);
     ascii_map('0', 10, FONT_DIGIT_TILE);    // 0-9
@@ -275,10 +280,10 @@ static void load_back_tiles_to_slot(uint8_t slot)
 {
     /* Fixed 3x4 red-back card from your tileset (GIDs from cards.tmx layout). */
     static const uint16_t back_gids[SRC_CARD_H][SRC_CARD_W] = {
-        {625, 626, 627},
-        {664, 665, 666},
-        {703, 704, 705},
-        {742, 743, 744},
+        {39, 40, 41},
+        {80, 81, 82},
+        {121, 122, 123},
+        {162, 163, 164},
     };
     uint8_t dst_base_tile = (uint8_t)(DST_TILE_BASE + (slot * (SRC_CARD_W * SRC_CARD_H)));
 
