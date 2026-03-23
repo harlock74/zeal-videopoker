@@ -7,12 +7,14 @@ Video Poker for Zeal 8-bit Computer.
 1. **Bet phase (`DEAL`)**
    - Adjust bet with `UP` / `DOWN`.
    - Press `ENTER` or `SPACE` to start the hand.
+   - Confirm actions are release-gated (fresh press required) to avoid accidental auto-deal.
    - Selected bet is subtracted from credits.
 2. **Hold phase (`DRAW`)**
    - Five cards are dealt from a shuffled 52-card deck.
    - Toggle hold with `A/S/D/F/G` (cards 1 to 5).
    - Held cards are marked with `HOLD` and a visual frame.
    - Press `ENTER` to draw replacements.
+   - Confirm actions are release-gated (fresh press required) to avoid accidental auto-draw.
 3. **Result phase**
    - Only non-held cards are replaced.
    - Final hand is evaluated against the pay table.
@@ -49,6 +51,7 @@ If credits reach `0`, the game resets bankroll and returns to the bet phase.
 Main gameplay is in `src/videopoker.c`.
 
 - `init()`: input/video init, asset loading, map/font setup, first screen
+- `validate_startup_tiles()`: validates critical UI/font/back GIDs at startup
 - `update()`: state machine and controls (`BET`, `HOLD`, `RESULT`)
 - `draw()`: full or partial redraw synchronized with VBlank
 - `start_new_round()`: deduct bet, reseed RNG, shuffle, deal
@@ -65,15 +68,19 @@ Main gameplay is in `src/videopoker.c`.
 
 Supporting files:
 
-- `src/assets.c` / `src/assets.h`: palette/tile loading helpers
+- `src/assets.c` / `src/assets.h`: palette/tile loading helpers + runtime card compositor
 - `src/layout_map.h`: generated TMX map header
 - `src/videopoker.h`: gameplay and rendering constants
+- `CARD_TILE_MAPPING.md`: single mapping reference for `cards.gif` positions and runtime GIDs
 
 ## Rendering Notes
 
 - Video mode: `ZVB_CTRL_VID_MODE_GFX_640_8BIT`
 - Each card is rendered as `3x4` tiles
 - UI layout is read from `cards.tmx` and generated into `layout_map.h`
+- Number card layouts (A..10) are table-driven via pip masks
+- Pip/face placement uses PDF-style named positions (`TOP_LEFT`, `MIDDLE1_CENTRE`, etc.)
+- Suit color is explicit via `kSuitColorBySuit[]` (no implicit suit-order assumption)
 
 ## Audio Implementation
 
@@ -96,7 +103,7 @@ Audio sync fix:
 Current hardware-tuned defaults:
 
 - `CARD_SFX_WAVEFORM = WAV_SAWTOOTH`
-- `CARD_SFX_BASE_FREQ = 148`
+- `CARD_SFX_BASE_FREQ = 10`
 - `CARD_SFX_JITTER_MASK = 0x03`
 - `CARD_SFX_DURATION = 1`
 - `CARD_REVEAL_DELAY = 4`
@@ -133,6 +140,16 @@ The game now includes three targeted optimizations for Zeal hardware:
    - `assets.c` keeps `cards.zts` stream open and tracks current offset.
    - This avoids repeated `open/close/seek` overhead for each tile load.
    - `assets_shutdown()` closes the stream in `deinit()`.
+
+## Safety Guards
+
+- Startup tile self-check validates:
+  - critical UI/font/back GIDs are in valid atlas range
+  - map-derived background tile is present in runtime remap
+- Card compositor tables are validated at startup:
+  - suit tiles
+  - red/black rank glyph strips
+  - J/Q/K face fragment tables
 
 ## Accreditation
 

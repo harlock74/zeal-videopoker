@@ -9,7 +9,6 @@
 
 #define ASSET_IO_CHUNK 128
 #define TILE_BYTES 256
-#define CARD_TILE_COLUMNS 41
 #define CARD_TILE_W 3
 #define CARD_TILE_H 4
 #define CARD_TILE_COUNT (CARD_TILE_W * CARD_TILE_H)
@@ -73,6 +72,14 @@ static const uint16_t kSuitGidBySuit[CARD_SUIT_COUNT] = {
     42,  /* Diamonds */
     124, /* Spades */
     83   /* Clubs */
+};
+
+/* Explicit suit->color mapping to avoid implicit dependency on suit ordering. */
+static const uint8_t kSuitColorBySuit[CARD_SUIT_COUNT] = {
+    COLOR_RED,   /* Hearts */
+    COLOR_RED,   /* Diamonds */
+    COLOR_BLACK, /* Spades */
+    COLOR_BLACK, /* Clubs */
 };
 
 static const uint16_t kRankGlyphRed[CARD_RANK_COUNT] = {
@@ -260,6 +267,51 @@ void assets_shutdown(void)
     close_asset_stream();
 }
 
+static uint8_t validate_gid_range_local(uint16_t gid, uint16_t max_gid, const char* label)
+{
+    if (gid == 0 || gid > max_gid) {
+        printf("Card table validation failed: %s GID %u out of 1..%u\n", label, gid, max_gid);
+        return 0;
+    }
+    return 1;
+}
+
+gfx_error assets_validate_card_tables(uint16_t max_gid)
+{
+    uint8_t ok = 1;
+
+    ok &= validate_gid_range_local(kWhiteCardTileGid, max_gid, "white_bg");
+
+    for (uint8_t i = 0; i < CARD_SUIT_COUNT; i++) {
+        ok &= validate_gid_range_local(kSuitGidBySuit[i], max_gid, "suit_gid");
+    }
+
+    for (uint8_t i = 0; i < CARD_RANK_COUNT; i++) {
+        ok &= validate_gid_range_local(kRankGlyphRed[i], max_gid, "rank_red");
+        ok &= validate_gid_range_local(kRankGlyphBlack[i], max_gid, "rank_black");
+    }
+
+    for (uint8_t c = 0; c < 2; c++) {
+        ok &= validate_gid_range_local(kJackFaceByColor[c].top, max_gid, "jack_top");
+        ok &= validate_gid_range_local(kJackFaceByColor[c].mid, max_gid, "jack_mid");
+        ok &= validate_gid_range_local(kJackFaceByColor[c].bottom, max_gid, "jack_bottom");
+
+        ok &= validate_gid_range_local(kKingFaceByColor[c].top, max_gid, "king_top");
+        ok &= validate_gid_range_local(kKingFaceByColor[c].mid, max_gid, "king_mid");
+        ok &= validate_gid_range_local(kKingFaceByColor[c].bottom, max_gid, "king_bottom");
+
+        ok &= validate_gid_range_local(kQueenFaceByColor[c].top, max_gid, "queen_top");
+        ok &= validate_gid_range_local(kQueenFaceByColor[c].mid_left, max_gid, "queen_mid_l");
+        ok &= validate_gid_range_local(kQueenFaceByColor[c].mid_center, max_gid, "queen_mid_c");
+        ok &= validate_gid_range_local(kQueenFaceByColor[c].mid_right, max_gid, "queen_mid_r");
+        ok &= validate_gid_range_local(kQueenFaceByColor[c].bottom_left, max_gid, "queen_bot_l");
+        ok &= validate_gid_range_local(kQueenFaceByColor[c].bottom_center, max_gid, "queen_bot_c");
+        ok &= validate_gid_range_local(kQueenFaceByColor[c].bottom_right, max_gid, "queen_bot_r");
+    }
+
+    return ok ? GFX_SUCCESS : GFX_FAILURE;
+}
+
 gfx_error load_source_tile(gfx_context* ctx, uint16_t src_gid, uint16_t dst_from_byte)
 {
     uint16_t src_index = (uint16_t)(src_gid - 1U);
@@ -369,7 +421,8 @@ gfx_error load_card_tiles(gfx_context* ctx, uint8_t card, uint16_t dst_from_byte
      */
     uint8_t rank = (uint8_t)(card % 13U);
     uint8_t suit = (uint8_t)((card / 13U) % CARD_SUIT_COUNT);
-    uint8_t black = (suit >= 2U);
+    uint8_t color = kSuitColorBySuit[suit];
+    uint8_t black = (color == COLOR_BLACK);
     uint16_t grid[CARD_TILE_H][CARD_TILE_W];
 
     init_card_grid(grid, kWhiteCardTileGid);

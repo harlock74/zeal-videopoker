@@ -1038,6 +1038,10 @@ void init(void)
         printf("Critical tile validation failed. Check cards.gif/cards.tsx/cards.tmx.\n");
         exit(1);
     }
+    if (assets_validate_card_tables(CARD_TILESET_MAX_GID) != GFX_SUCCESS) {
+        printf("Card composition tile validation failed. Check cards.gif tile mappings.\n");
+        exit(1);
+    }
     load_ui_font_tiles();
     render_table();
     invalidate_slot_cache();
