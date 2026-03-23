@@ -12,6 +12,93 @@
 #define CARD_TILE_COLUMNS 41
 #define CARD_TILE_W 3
 #define CARD_TILE_H 4
+#define CARD_TILE_COUNT (CARD_TILE_W * CARD_TILE_H)
+#define CARD_RANK_COUNT 13
+#define CARD_SUIT_COUNT 4
+
+enum {
+    COLOR_RED = 0,
+    COLOR_BLACK = 1,
+};
+
+enum {
+    RANK_ACE = 0,
+    RANK_JACK = 10,
+    RANK_QUEEN = 11,
+    RANK_KING = 12,
+};
+
+typedef struct {
+    uint16_t top;
+    uint16_t mid;
+    uint16_t bottom;
+} FaceColumn;
+
+typedef struct {
+    uint16_t top;
+    uint16_t mid_left;
+    uint16_t mid_center;
+    uint16_t mid_right;
+    uint16_t bottom_left;
+    uint16_t bottom_center;
+    uint16_t bottom_right;
+} QueenFace;
+
+/*
+ * 3x4 card grid positions named to match the design PDF terminology:
+ * Top, Middle1, Middle2, Bottom x Left/Centre/Right.
+ */
+typedef enum {
+    TOP_LEFT = 0,
+    TOP_CENTRE,
+    TOP_RIGHT,
+    MIDDLE1_LEFT,
+    MIDDLE1_CENTRE,
+    MIDDLE1_RIGHT,
+    MIDDLE2_LEFT,
+    MIDDLE2_CENTRE,
+    MIDDLE2_RIGHT,
+    BOTTOM_LEFT,
+    BOTTOM_CENTRE,
+    BOTTOM_RIGHT,
+} CardPos;
+
+#define POS_BIT(pos) ((uint16_t)(1U << (pos)))
+
+/* Core card composition GIDs from cards.gif. */
+static const uint16_t kWhiteCardTileGid = 12;
+
+static const uint16_t kSuitGidBySuit[CARD_SUIT_COUNT] = {
+    1,   /* Hearts */
+    42,  /* Diamonds */
+    124, /* Spades */
+    83   /* Clubs */
+};
+
+static const uint16_t kRankGlyphRed[CARD_RANK_COUNT] = {
+    13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25
+};
+
+static const uint16_t kRankGlyphBlack[CARD_RANK_COUNT] = {
+    54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66
+};
+
+/* J and K are center-column portraits (top/mid/bottom) with red/black variants. */
+static const FaceColumn kJackFaceByColor[2] = {
+    {2, 43, 84},  /* Red J */
+    {3, 44, 85},  /* Black J */
+};
+
+static const FaceColumn kKingFaceByColor[2] = {
+    {10, 51, 92}, /* Red K */
+    {11, 52, 93}, /* Black K */
+};
+
+/* Q uses wider portrait fragments. */
+static const QueenFace kQueenFaceByColor[2] = {
+    {5, 45, 46, 47, 86, 87, 88}, /* Red Q */
+    {8, 48, 49, 50, 89, 90, 91}, /* Black Q */
+};
 
 /*
  * Reusable stream state to avoid repeated open/close/seek churn.
@@ -190,92 +277,51 @@ static void init_card_grid(uint16_t grid[CARD_TILE_H][CARD_TILE_W], uint16_t gid
     }
 }
 
+static void set_card_pos(uint16_t grid[CARD_TILE_H][CARD_TILE_W], CardPos pos, uint16_t gid)
+{
+    uint8_t row = (uint8_t)pos / CARD_TILE_W;
+    uint8_t col = (uint8_t)pos % CARD_TILE_W;
+    grid[row][col] = gid;
+}
+
 static void set_pips_for_rank(uint16_t grid[CARD_TILE_H][CARD_TILE_W], uint8_t rank, uint16_t suit_gid)
 {
     /*
-     * Pip layout in 3x4 card cells:
-     * row 0: top, row 3: bottom, col 1: center.
+     * Pip layouts for A..10 as 12-bit masks over the 3x4 grid:
+     * indices:  0  1  2
+     *           3  4  5
+     *           6  7  8
+     *           9 10 11
      */
-    switch (rank) {
-        case 0: /* A */
-            grid[2][1] = suit_gid;
-            break;
-        case 1: /* 2 */
-            grid[1][1] = suit_gid;
-            grid[3][1] = suit_gid;
-            break;
-        case 2: /* 3 */
-            grid[1][1] = suit_gid;
-            grid[2][1] = suit_gid;
-            grid[3][1] = suit_gid;
-            break;
-        case 3: /* 4 */
-            grid[1][0] = suit_gid;
-            grid[1][2] = suit_gid;
-            grid[3][0] = suit_gid;
-            grid[3][2] = suit_gid;
-            break;
-        case 4: /* 5 */
-            grid[1][0] = suit_gid;
-            grid[1][2] = suit_gid;
-            grid[2][1] = suit_gid;
-            grid[3][0] = suit_gid;
-            grid[3][2] = suit_gid;
-            break;
-        case 5: /* 6 */
-            grid[1][0] = suit_gid;
-            grid[1][2] = suit_gid;
-            grid[2][0] = suit_gid;
-            grid[2][2] = suit_gid;
-            grid[3][0] = suit_gid;
-            grid[3][2] = suit_gid;
-            break;
-        case 6: /* 7 */
-            /* Middle1: left+right, Middle2: left+center+right, Bottom: left+right */
-            grid[1][0] = suit_gid;
-            grid[1][2] = suit_gid;
-            grid[2][0] = suit_gid;
-            grid[2][1] = suit_gid;
-            grid[2][2] = suit_gid;
-            grid[3][0] = suit_gid;
-            grid[3][2] = suit_gid;
-            break;
-        case 7: /* 8 */
-            /* Middle1: left+right, Middle2: left+center+right, Bottom: left+center+right */
-            grid[1][0] = suit_gid;
-            grid[1][2] = suit_gid;
-            grid[2][0] = suit_gid;
-            grid[2][1] = suit_gid;
-            grid[2][2] = suit_gid;
-            grid[3][0] = suit_gid;
-            grid[3][1] = suit_gid;
-            grid[3][2] = suit_gid;
-            break;
-        case 8: /* 9 */
-            grid[1][0] = suit_gid;
-            grid[1][1] = suit_gid;
-            grid[1][2] = suit_gid;
-            grid[2][0] = suit_gid;
-            grid[2][1] = suit_gid;
-            grid[2][2] = suit_gid;
-            grid[3][0] = suit_gid;
-            grid[3][1] = suit_gid;
-            grid[3][2] = suit_gid;
-            break;
-        case 9: /* 10 */
-            grid[0][1] = suit_gid;
-            grid[1][0] = suit_gid;
-            grid[1][1] = suit_gid;
-            grid[1][2] = suit_gid;
-            grid[2][0] = suit_gid;
-            grid[2][1] = suit_gid;
-            grid[2][2] = suit_gid;
-            grid[3][0] = suit_gid;
-            grid[3][1] = suit_gid;
-            grid[3][2] = suit_gid;
-            break;
-        default:
-            break;
+    static const uint16_t kPipMaskByRank[10] = {
+        /* A  */ POS_BIT(MIDDLE2_CENTRE),
+        /* 2  */ POS_BIT(MIDDLE1_CENTRE) | POS_BIT(BOTTOM_CENTRE),
+        /* 3  */ POS_BIT(MIDDLE1_CENTRE) | POS_BIT(MIDDLE2_CENTRE) | POS_BIT(BOTTOM_CENTRE),
+        /* 4  */ POS_BIT(MIDDLE1_LEFT) | POS_BIT(MIDDLE1_RIGHT) | POS_BIT(BOTTOM_LEFT) | POS_BIT(BOTTOM_RIGHT),
+        /* 5  */ POS_BIT(MIDDLE1_LEFT) | POS_BIT(MIDDLE1_RIGHT) | POS_BIT(MIDDLE2_CENTRE) | POS_BIT(BOTTOM_LEFT) | POS_BIT(BOTTOM_RIGHT),
+        /* 6  */ POS_BIT(MIDDLE1_LEFT) | POS_BIT(MIDDLE1_RIGHT) | POS_BIT(MIDDLE2_LEFT) | POS_BIT(MIDDLE2_RIGHT) | POS_BIT(BOTTOM_LEFT) | POS_BIT(BOTTOM_RIGHT),
+        /* 7  */ POS_BIT(MIDDLE1_LEFT) | POS_BIT(MIDDLE1_RIGHT) | POS_BIT(MIDDLE2_LEFT) | POS_BIT(MIDDLE2_CENTRE) | POS_BIT(MIDDLE2_RIGHT) | POS_BIT(BOTTOM_LEFT) | POS_BIT(BOTTOM_RIGHT),
+        /* 8  */ POS_BIT(MIDDLE1_LEFT) | POS_BIT(MIDDLE1_RIGHT) | POS_BIT(MIDDLE2_LEFT) | POS_BIT(MIDDLE2_CENTRE) | POS_BIT(MIDDLE2_RIGHT) | POS_BIT(BOTTOM_LEFT) | POS_BIT(BOTTOM_CENTRE) | POS_BIT(BOTTOM_RIGHT),
+        /* 9  */ POS_BIT(MIDDLE1_LEFT) | POS_BIT(MIDDLE1_CENTRE) | POS_BIT(MIDDLE1_RIGHT) | POS_BIT(MIDDLE2_LEFT) | POS_BIT(MIDDLE2_CENTRE) | POS_BIT(MIDDLE2_RIGHT) | POS_BIT(BOTTOM_LEFT) | POS_BIT(BOTTOM_CENTRE) | POS_BIT(BOTTOM_RIGHT),
+        /* 10 */ POS_BIT(TOP_CENTRE) | POS_BIT(MIDDLE1_LEFT) | POS_BIT(MIDDLE1_CENTRE) | POS_BIT(MIDDLE1_RIGHT) | POS_BIT(MIDDLE2_LEFT) | POS_BIT(MIDDLE2_CENTRE) | POS_BIT(MIDDLE2_RIGHT) | POS_BIT(BOTTOM_LEFT) | POS_BIT(BOTTOM_CENTRE) | POS_BIT(BOTTOM_RIGHT),
+    };
+
+    uint16_t mask;
+    uint8_t pos;
+    uint8_t row;
+    uint8_t col;
+
+    if (rank >= 10U) {
+        return;
+    }
+
+    mask = kPipMaskByRank[rank];
+    for (pos = 0; pos < CARD_TILE_COUNT; pos++) {
+        if (mask & (uint16_t)(1U << pos)) {
+            row = (uint8_t)(pos / CARD_TILE_W);
+            col = (uint8_t)(pos % CARD_TILE_W);
+            grid[row][col] = suit_gid;
+        }
     }
 }
 
@@ -289,24 +335,29 @@ static void set_face_figure(
      * Figure cards (J/Q/K) are assembled from dedicated portrait components.
      * Suit marker must be in row 1, col 0 (left side), matching the template.
      */
-    grid[1][0] = suit_gid;
+    set_card_pos(grid, MIDDLE1_LEFT, suit_gid);
 
-    if (rank == 10) { /* J */
-        grid[1][1] = black ? 3 : 2;
-        grid[2][1] = black ? 44 : 43;
-        grid[3][1] = black ? 85 : 84;
-    } else if (rank == 11) { /* Q */
-        grid[1][1] = black ? 8 : 5;
-        grid[2][0] = black ? 48 : 45;
-        grid[2][1] = black ? 49 : 46;
-        grid[2][2] = black ? 50 : 47;
-        grid[3][0] = black ? 89 : 86;
-        grid[3][1] = black ? 90 : 87;
-        grid[3][2] = black ? 91 : 88;
-    } else if (rank == 12) { /* K */
-        grid[1][1] = black ? 11 : 10;
-        grid[2][1] = black ? 52 : 51;
-        grid[3][1] = black ? 93 : 92;
+    uint8_t color_idx = black ? COLOR_BLACK : COLOR_RED;
+
+    if (rank == RANK_JACK) {
+        const FaceColumn* face = &kJackFaceByColor[color_idx];
+        set_card_pos(grid, MIDDLE1_CENTRE, face->top);
+        set_card_pos(grid, MIDDLE2_CENTRE, face->mid);
+        set_card_pos(grid, BOTTOM_CENTRE, face->bottom);
+    } else if (rank == RANK_QUEEN) {
+        const QueenFace* face = &kQueenFaceByColor[color_idx];
+        set_card_pos(grid, MIDDLE1_CENTRE, face->top);
+        set_card_pos(grid, MIDDLE2_LEFT, face->mid_left);
+        set_card_pos(grid, MIDDLE2_CENTRE, face->mid_center);
+        set_card_pos(grid, MIDDLE2_RIGHT, face->mid_right);
+        set_card_pos(grid, BOTTOM_LEFT, face->bottom_left);
+        set_card_pos(grid, BOTTOM_CENTRE, face->bottom_center);
+        set_card_pos(grid, BOTTOM_RIGHT, face->bottom_right);
+    } else if (rank == RANK_KING) {
+        const FaceColumn* face = &kKingFaceByColor[color_idx];
+        set_card_pos(grid, MIDDLE1_CENTRE, face->top);
+        set_card_pos(grid, MIDDLE2_CENTRE, face->mid);
+        set_card_pos(grid, BOTTOM_CENTRE, face->bottom);
     }
 }
 
@@ -316,34 +367,20 @@ gfx_error load_card_tiles(gfx_context* ctx, uint8_t card, uint16_t dst_from_byte
      * cards.gif now stores reusable components (rank glyphs/suit pips/figure parts),
      * so each 3x4 card face is composed tile-by-tile at load time.
      */
-    static const uint16_t suit_gid_by_suit[4] = {
-        1,   /* Hearts */
-        42,  /* Diamonds */
-        124, /* Spades */
-        83   /* Clubs */
-    };
-    static const uint16_t rank_glyph_red[13] = {
-        13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25
-    };
-    static const uint16_t rank_glyph_black[13] = {
-        54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66
-    };
-    const uint16_t white_bg_gid = 12;
-
     uint8_t rank = (uint8_t)(card % 13U);
-    uint8_t suit = (uint8_t)((card / 13U) % 4U);
+    uint8_t suit = (uint8_t)((card / 13U) % CARD_SUIT_COUNT);
     uint8_t black = (suit >= 2U);
     uint16_t grid[CARD_TILE_H][CARD_TILE_W];
 
-    init_card_grid(grid, white_bg_gid);
+    init_card_grid(grid, kWhiteCardTileGid);
 
     /* Rank glyph in top-left cell, color by suit family. */
-    grid[0][0] = black ? rank_glyph_black[rank] : rank_glyph_red[rank];
+    set_card_pos(grid, TOP_LEFT, black ? kRankGlyphBlack[rank] : kRankGlyphRed[rank]);
 
-    if (rank < 10U) {
-        set_pips_for_rank(grid, rank, suit_gid_by_suit[suit]);
+    if (rank < RANK_JACK) {
+        set_pips_for_rank(grid, rank, kSuitGidBySuit[suit]);
     } else {
-        set_face_figure(grid, rank, black, suit_gid_by_suit[suit]);
+        set_face_figure(grid, rank, black, kSuitGidBySuit[suit]);
     }
 
     for (uint8_t row = 0; row < CARD_TILE_H; row++) {

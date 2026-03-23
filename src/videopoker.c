@@ -24,6 +24,12 @@
 #define CARD_SFX_DURATION 1
 #define CARD_REVEAL_DELAY 4
 #define CARD_SFX_WAVEFORM WAV_SAWTOOTH
+#define CARD_TILESET_COLUMNS 41
+#define CARD_TILESET_ROWS 5
+#define CARD_TILESET_MAX_GID (CARD_TILESET_COLUMNS * CARD_TILESET_ROWS)
+#define FONT_DIGIT_COUNT 10
+#define FONT_ALPHA_COUNT 13
+#define LAYOUT_SPACE_SAMPLE_X 2
 
 /* Global graphics context used by ZVB drawing APIs. */
 gfx_context vctx;
@@ -79,6 +85,8 @@ typedef struct {
 
 /* Debounce timer to avoid Enter/Space double-triggering state transitions. */
 static uint8_t suppress_enter_ticks = 0;
+/* Requires Enter/Space release before accepting next confirm action. */
+static uint8_t confirm_armed = 0;
 /* Cache of currently uploaded visuals for each card slot. */
 static SlotVisualCache slot_cache[CARD_COUNT];
 /* Per-slot render invalidation mask for incremental redraws. */
@@ -108,6 +116,22 @@ static const uint8_t win_y = 17;
 static const uint8_t credit_x = 34;
 static const uint8_t credit_y = 17;
 
+/* Critical source GIDs used outside TMX map rendering. */
+static const uint16_t kHoldFrameSourceGid = 105;
+static const uint16_t kDigitGidBase = 165;
+static const uint16_t kAlphaAGidBase = 175;
+static const uint16_t kAlphaNGidBase = 188;
+static const uint16_t kColonGid = 201;
+static const uint16_t kExclGid = 202;
+
+/* 3x4 red-back card source GIDs. */
+static const uint16_t kBackCardGids[SRC_CARD_H][SRC_CARD_W] = {
+    {39, 40, 41},
+    {80, 81, 82},
+    {121, 122, 123},
+    {162, 163, 164},
+};
+
 static void restart_if_credit_low(void);
 static void return_to_bet_phase(void);
 static void reseed_rng_for_new_hand(void);
@@ -119,6 +143,7 @@ static void invalidate_slot_cache(void);
 static void ensure_slot_tiles(uint8_t slot, uint8_t show_face, uint8_t card);
 static void mark_all_slots_dirty(void);
 static void mark_slot_dirty(uint8_t slot);
+static uint8_t validate_startup_tiles(void);
 
 /* Card IDs are 0..51, grouped by suits in blocks of 13. */
 static uint8_t card_rank(uint8_t card)
@@ -144,37 +169,82 @@ static uint8_t map_gid_to_tile(uint16_t gid)
     return FONT_SPACE_TILE;
 }
 
+static uint8_t is_gid_mapped(uint16_t gid)
+{
+    for (uint8_t i = 0; i < mapped_count; i++) {
+        if (mapped_gids[i] == gid) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static uint8_t validate_gid_range(uint16_t gid, const char* name)
+{
+    if (gid == 0 || gid > CARD_TILESET_MAX_GID) {
+        printf("Tile self-check failed: %s GID %u out of 1..%u\n", name, gid, CARD_TILESET_MAX_GID);
+        return 0;
+    }
+    return 1;
+}
+
+static uint8_t validate_startup_tiles(void)
+{
+    /*
+     * Early guard against cards.gif/cards.tsx drift.
+     * Validate only critical hardcoded GIDs used by font/back/hold paths.
+     */
+    uint8_t ok = 1;
+    uint16_t space_gid = kLayoutGids[(hold_y * LAYOUT_W) + LAYOUT_SPACE_SAMPLE_X];
+
+    ok &= validate_gid_range(kHoldFrameSourceGid, "hold_frame");
+    ok &= validate_gid_range(space_gid, "space_bg");
+    ok &= validate_gid_range(kColonGid, "font_colon");
+    ok &= validate_gid_range(kExclGid, "font_excl");
+    ok &= validate_gid_range((uint16_t)(kDigitGidBase + (FONT_DIGIT_COUNT - 1)), "font_digit_9");
+    ok &= validate_gid_range((uint16_t)(kAlphaAGidBase + (FONT_ALPHA_COUNT - 1)), "font_alpha_M");
+    ok &= validate_gid_range((uint16_t)(kAlphaNGidBase + (FONT_ALPHA_COUNT - 1)), "font_alpha_Z");
+
+    for (uint8_t row = 0; row < SRC_CARD_H; row++) {
+        for (uint8_t col = 0; col < SRC_CARD_W; col++) {
+            ok &= validate_gid_range(kBackCardGids[row][col], "back_card");
+        }
+    }
+
+    if (!is_gid_mapped(space_gid)) {
+        printf("Tile self-check failed: space_bg GID %u missing from map remap\n", space_gid);
+        ok = 0;
+    }
+
+    return ok;
+}
+
 static void load_ui_font_tiles(void)
 {
-    uint16_t space_gid = kLayoutGids[(hold_y * LAYOUT_W) + 2];
-    const uint16_t digit_gid_base = 165;
-    const uint16_t alpha_a_gid_base = 175;
-    const uint16_t alpha_n_gid_base = 188;
-    const uint16_t colon_gid = 201;
-    const uint16_t excl_gid = 202;
+    uint16_t space_gid = kLayoutGids[(hold_y * LAYOUT_W) + LAYOUT_SPACE_SAMPLE_X];
 
     /* Frame tile used to highlight held cards (green suit-symbol tile). */
-    load_source_tile(&vctx, 105, (uint16_t)HOLD_FRAME_TILE * TILE_SIZE);
+    load_source_tile(&vctx, kHoldFrameSourceGid, (uint16_t)HOLD_FRAME_TILE * TILE_SIZE);
 
     /* Space/background tile used to clear text areas cleanly. */
     load_source_tile(&vctx, space_gid, (uint16_t)FONT_SPACE_TILE * TILE_SIZE);
 
     /* Digits and A-Z are loaded from your font strip row in cards.gif. */
-    for (uint8_t i = 0; i < 10; i++) {
-        load_source_tile(&vctx, (uint16_t)(digit_gid_base + i), (uint16_t)(FONT_DIGIT_TILE + i) * TILE_SIZE);
+    for (uint8_t i = 0; i < FONT_DIGIT_COUNT; i++) {
+        load_source_tile(&vctx, (uint16_t)(kDigitGidBase + i), (uint16_t)(FONT_DIGIT_TILE + i) * TILE_SIZE);
     }
 
-    for (uint8_t i = 0; i < 13; i++) {
-        load_source_tile(&vctx, (uint16_t)(alpha_a_gid_base + i), (uint16_t)(FONT_ALPHA_A_TILE + i) * TILE_SIZE);
+    for (uint8_t i = 0; i < FONT_ALPHA_COUNT; i++) {
+        load_source_tile(&vctx, (uint16_t)(kAlphaAGidBase + i), (uint16_t)(FONT_ALPHA_A_TILE + i) * TILE_SIZE);
     }
 
-    for (uint8_t i = 0; i < 13; i++) {
-        load_source_tile(&vctx, (uint16_t)(alpha_n_gid_base + i), (uint16_t)(FONT_ALPHA_N_TILE + i) * TILE_SIZE);
+    for (uint8_t i = 0; i < FONT_ALPHA_COUNT; i++) {
+        load_source_tile(&vctx, (uint16_t)(kAlphaNGidBase + i), (uint16_t)(FONT_ALPHA_N_TILE + i) * TILE_SIZE);
     }
 
     /* Punctuation tiles follow Z in the custom font strip. */
-    load_source_tile(&vctx, colon_gid, (uint16_t)FONT_COLON_TILE * TILE_SIZE);
-    load_source_tile(&vctx, excl_gid, (uint16_t)FONT_EXCL_TILE * TILE_SIZE);
+    load_source_tile(&vctx, kColonGid, (uint16_t)FONT_COLON_TILE * TILE_SIZE);
+    load_source_tile(&vctx, kExclGid, (uint16_t)FONT_EXCL_TILE * TILE_SIZE);
 
     ascii_map(' ', 1, FONT_SPACE_TILE);
     ascii_map('0', 10, FONT_DIGIT_TILE);    // 0-9
@@ -279,18 +349,12 @@ static void load_card_tiles_to_slot(uint8_t slot, uint8_t card)
 static void load_back_tiles_to_slot(uint8_t slot)
 {
     /* Fixed 3x4 red-back card from your tileset (GIDs from cards.tmx layout). */
-    static const uint16_t back_gids[SRC_CARD_H][SRC_CARD_W] = {
-        {39, 40, 41},
-        {80, 81, 82},
-        {121, 122, 123},
-        {162, 163, 164},
-    };
     uint8_t dst_base_tile = (uint8_t)(DST_TILE_BASE + (slot * (SRC_CARD_W * SRC_CARD_H)));
 
     for (uint8_t row = 0; row < SRC_CARD_H; row++) {
         for (uint8_t col = 0; col < SRC_CARD_W; col++) {
             uint8_t dst_tile = (uint8_t)(dst_base_tile + (row * SRC_CARD_W) + col);
-            load_source_tile(&vctx, back_gids[row][col], (uint16_t)dst_tile * TILE_SIZE);
+            load_source_tile(&vctx, kBackCardGids[row][col], (uint16_t)dst_tile * TILE_SIZE);
         }
     }
 }
@@ -970,6 +1034,10 @@ void init(void)
     }
 
     init_layout_tiles();
+    if (!validate_startup_tiles()) {
+        printf("Critical tile validation failed. Check cards.gif/cards.tsx/cards.tmx.\n");
+        exit(1);
+    }
     load_ui_font_tiles();
     render_table();
     invalidate_slot_cache();
@@ -980,6 +1048,8 @@ void init(void)
     show_card_faces = 0;
     start_reveal_sequence(all_slots, CARD_COUNT, 0);
     state = STATE_BET;
+    suppress_enter_ticks = 8;
+    confirm_armed = 0;
     render_cards();
     needs_redraw = 0;
     needs_hud_redraw = 0;
@@ -1008,6 +1078,10 @@ void update(void)
     if (suppress_enter_ticks > 0) {
         suppress_enter_ticks--;
     }
+    /* Re-arm confirm only after Enter/Space are fully released. */
+    if (!ev.enter && !ev.space) {
+        confirm_armed = 1;
+    }
 
     if (ev.quit) {
         deinit();
@@ -1025,7 +1099,8 @@ void update(void)
                 needs_hud_redraw = 1;
             }
         }
-        if (ev.enter && suppress_enter_ticks == 0) {
+        if (ev.enter && suppress_enter_ticks == 0 && confirm_armed) {
+            confirm_armed = 0;
             draw_hand();
         }
         return;
@@ -1038,7 +1113,8 @@ void update(void)
                 show_win_banner = 0;
                 needs_hud_redraw = 1;
             }
-            if (ev.enter || ev.space) {
+            if ((ev.enter || ev.space) && confirm_armed) {
+                confirm_armed = 0;
                 return_to_bet_phase();
             }
         }
@@ -1060,7 +1136,8 @@ void update(void)
             bet--;
             needs_hud_redraw = 1;
         }
-        if ((ev.enter || ev.space) && suppress_enter_ticks == 0) {
+        if ((ev.enter || ev.space) && suppress_enter_ticks == 0 && confirm_armed) {
+            confirm_armed = 0;
             start_new_round();
         }
     }
