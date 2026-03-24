@@ -93,6 +93,8 @@ static uint8_t mapped_tiles[MAP_TILE_CAPACITY];
 static uint8_t mapped_count = 0;
 /* Runtime mapping for shared card-component tiles (source GID -> runtime tile). */
 static uint8_t card_gid_to_runtime[CARD_TILESET_MAX_GID + 1];
+/* One-shot diagnostics if a GID ever falls back at runtime. */
+static uint8_t card_gid_missing_warned[CARD_TILESET_MAX_GID + 1];
 
 /* Position of each playable card slot (top-left tile of 3x4 card). */
 static const uint8_t slot_x[CARD_COUNT] = {5, 12, 19, 26, 33};
@@ -130,6 +132,7 @@ static void mark_all_slots_dirty(void);
 static void mark_slot_dirty(uint8_t slot);
 static uint8_t validate_startup_tiles(void);
 static uint8_t init_card_component_tiles(void);
+static uint8_t verify_card_component_coverage(void);
 
 /* Card IDs are 0..51, grouped by suits in blocks of 13. */
 static uint8_t card_rank(uint8_t card)
@@ -202,10 +205,15 @@ static uint8_t validate_startup_tiles(void)
 static uint8_t map_card_gid_to_tile(uint16_t gid)
 {
     if (gid == 0 || gid > CARD_TILESET_MAX_GID) {
+        printf("Card tile fallback: invalid source GID %u\n", gid);
         return FONT_SPACE_TILE;
     }
 
     if (card_gid_to_runtime[gid] == 0) {
+        if (!card_gid_missing_warned[gid]) {
+            printf("Card tile fallback: source GID %u not preloaded in shared card pool\n", gid);
+            card_gid_missing_warned[gid] = 1;
+        }
         return FONT_SPACE_TILE;
     }
 
@@ -218,6 +226,7 @@ static uint8_t init_card_component_tiles(void)
     uint8_t count = assets_collect_component_gids(gids, CARD_SHARED_TILE_CAPACITY);
 
     memset(card_gid_to_runtime, 0, sizeof(card_gid_to_runtime));
+    memset(card_gid_missing_warned, 0, sizeof(card_gid_missing_warned));
 
     if (count == 0) {
         printf("Card tile init failed: no component GIDs collected\n");
@@ -243,6 +252,45 @@ static uint8_t init_card_component_tiles(void)
         }
 
         card_gid_to_runtime[gid] = runtime_tile;
+    }
+
+    return 1;
+}
+
+static uint8_t verify_card_component_coverage(void)
+{
+    uint16_t grid[SRC_CARD_H][SRC_CARD_W];
+
+    for (uint8_t card = 0; card < DECK_SIZE; card++) {
+        assets_build_card_gid_grid(grid, card);
+        for (uint8_t row = 0; row < SRC_CARD_H; row++) {
+            for (uint8_t col = 0; col < SRC_CARD_W; col++) {
+                uint16_t gid = grid[row][col];
+                if (gid == 0 || gid > CARD_TILESET_MAX_GID) {
+                    printf("Card coverage check failed: card %u uses out-of-range GID %u\n", card, gid);
+                    return 0;
+                }
+                if (card_gid_to_runtime[gid] == 0) {
+                    printf("Card coverage check failed: card %u needs GID %u not in shared pool\n", card, gid);
+                    return 0;
+                }
+            }
+        }
+    }
+
+    assets_build_back_gid_grid(grid);
+    for (uint8_t row = 0; row < SRC_CARD_H; row++) {
+        for (uint8_t col = 0; col < SRC_CARD_W; col++) {
+            uint16_t gid = grid[row][col];
+            if (gid == 0 || gid > CARD_TILESET_MAX_GID) {
+                printf("Card coverage check failed: back grid uses out-of-range GID %u\n", gid);
+                return 0;
+            }
+            if (card_gid_to_runtime[gid] == 0) {
+                printf("Card coverage check failed: back grid needs GID %u not in shared pool\n", gid);
+                return 0;
+            }
+        }
     }
 
     return 1;
@@ -1027,6 +1075,10 @@ void init(void)
     }
     if (!init_card_component_tiles()) {
         printf("Card component tile preload failed.\n");
+        exit(1);
+    }
+    if (!verify_card_component_coverage()) {
+        printf("Card component coverage check failed.\n");
         exit(1);
     }
     load_ui_font_tiles();

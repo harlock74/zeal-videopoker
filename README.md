@@ -53,6 +53,7 @@ Main gameplay is in `src/videopoker.c`.
 - `init()`: input/video init, asset loading, map/font setup, startup checks, shared card tile init
 - `validate_startup_tiles()`: validates critical UI/font/back GIDs at startup
 - `init_card_component_tiles()`: preloads unique reusable card component GIDs once into VRAM shared pool (`184..255`)
+- `verify_card_component_coverage()`: exhaustively checks that all GIDs used by all 52 face grids + back grid are preloaded
 - `update()`: state machine and controls (`BET`, `HOLD`, `RESULT`)
 - `draw()`: full or partial redraw synchronized with VBlank
 - `start_new_round()`: deduct bet, reseed RNG, shuffle, deal
@@ -61,6 +62,7 @@ Main gameplay is in `src/videopoker.c`.
 - `evaluate_hand()`: rank detection and multiplier selection
 - `render_layout()` / `render_cards()`: map/card/HUD/banner rendering
 - `draw_card_slot_direct()`: draws one 3x4 card by mapping a GID grid directly to shared runtime tiles
+- `map_card_gid_to_tile()`: shared GID -> runtime tile mapper with safe fallback diagnostics
 - `shuffle_deck()` / `pop_deck()`: deck management (Fisher-Yates shuffle)
 - `start_reveal_sequence()` / `update_reveal_sequence()`: one-by-one card reveal timing
 - `play_card_place_sound()`: per-card SFX trigger during reveals
@@ -135,6 +137,10 @@ Current hardware-tuned defaults:
   - red/black rank glyph strips
   - J/Q/K face fragment tables
   - white card tile and back-card matrix
+- Shared-card preload coverage is validated at startup:
+  - all 52 generated face card grids
+  - back-card grid
+  - startup aborts if any required GID is missing from `card_gid_to_runtime[]`
 
 ## Accreditation
 
