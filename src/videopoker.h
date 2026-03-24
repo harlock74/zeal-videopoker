@@ -19,7 +19,6 @@
 
 #define SRC_CARD_W 3
 #define SRC_CARD_H 4
-#define DST_TILE_BASE 192
 
 /*
  * Runtime tile allocation:
@@ -27,7 +26,7 @@
  *  - font tiles:  144..179
  *  - space tile:  180
  *  - hold frame:  181
- *  - card slots:  192..251 (5 cards * 3x4 = 60 tiles)
+ *  - shared card components: 184..255
  */
 #define MAP_TILE_BASE 32
 #define MAP_TILE_CAPACITY 112

@@ -30,6 +30,8 @@
 #define FONT_DIGIT_COUNT 10
 #define FONT_ALPHA_COUNT 13
 #define LAYOUT_SPACE_SAMPLE_X 2
+#define CARD_SHARED_TILE_BASE 184
+#define CARD_SHARED_TILE_CAPACITY ((uint8_t)(256 - CARD_SHARED_TILE_BASE))
 
 /* Global graphics context used by ZVB drawing APIs. */
 gfx_context vctx;
@@ -76,19 +78,10 @@ typedef struct {
     uint8_t hold_toggle[CARD_COUNT];
 } KeyEvents;
 
-/* Tracks what card visuals are already loaded into each slot's VRAM tile block. */
-typedef struct {
-    uint8_t valid;
-    uint8_t face_up;
-    uint8_t card;
-} SlotVisualCache;
-
 /* Debounce timer to avoid Enter/Space double-triggering state transitions. */
 static uint8_t suppress_enter_ticks = 0;
 /* Requires Enter/Space release before accepting next confirm action. */
 static uint8_t confirm_armed = 0;
-/* Cache of currently uploaded visuals for each card slot. */
-static SlotVisualCache slot_cache[CARD_COUNT];
 /* Per-slot render invalidation mask for incremental redraws. */
 static uint8_t dirty_slots[CARD_COUNT];
 /* Forces one pass over all slots (startup/phase reset). */
@@ -98,6 +91,8 @@ static uint8_t full_redraw = 1;
 static uint16_t mapped_gids[MAP_TILE_CAPACITY];
 static uint8_t mapped_tiles[MAP_TILE_CAPACITY];
 static uint8_t mapped_count = 0;
+/* Runtime mapping for shared card-component tiles (source GID -> runtime tile). */
+static uint8_t card_gid_to_runtime[CARD_TILESET_MAX_GID + 1];
 
 /* Position of each playable card slot (top-left tile of 3x4 card). */
 static const uint8_t slot_x[CARD_COUNT] = {5, 12, 19, 26, 33};
@@ -124,14 +119,6 @@ static const uint16_t kAlphaNGidBase = 188;
 static const uint16_t kColonGid = 201;
 static const uint16_t kExclGid = 202;
 
-/* 3x4 red-back card source GIDs. */
-static const uint16_t kBackCardGids[SRC_CARD_H][SRC_CARD_W] = {
-    {39, 40, 41},
-    {80, 81, 82},
-    {121, 122, 123},
-    {162, 163, 164},
-};
-
 static void restart_if_credit_low(void);
 static void return_to_bet_phase(void);
 static void reseed_rng_for_new_hand(void);
@@ -139,11 +126,10 @@ static void start_reveal_sequence(const uint8_t* slots, uint8_t len, uint8_t ini
 static void update_reveal_sequence(void);
 static void play_card_place_sound(void);
 static void set_win_banner_from_result(const HandResult* result);
-static void invalidate_slot_cache(void);
-static void ensure_slot_tiles(uint8_t slot, uint8_t show_face, uint8_t card);
 static void mark_all_slots_dirty(void);
 static void mark_slot_dirty(uint8_t slot);
 static uint8_t validate_startup_tiles(void);
+static uint8_t init_card_component_tiles(void);
 
 /* Card IDs are 0..51, grouped by suits in blocks of 13. */
 static uint8_t card_rank(uint8_t card)
@@ -205,18 +191,61 @@ static uint8_t validate_startup_tiles(void)
     ok &= validate_gid_range((uint16_t)(kAlphaAGidBase + (FONT_ALPHA_COUNT - 1)), "font_alpha_M");
     ok &= validate_gid_range((uint16_t)(kAlphaNGidBase + (FONT_ALPHA_COUNT - 1)), "font_alpha_Z");
 
-    for (uint8_t row = 0; row < SRC_CARD_H; row++) {
-        for (uint8_t col = 0; col < SRC_CARD_W; col++) {
-            ok &= validate_gid_range(kBackCardGids[row][col], "back_card");
-        }
-    }
-
     if (!is_gid_mapped(space_gid)) {
         printf("Tile self-check failed: space_bg GID %u missing from map remap\n", space_gid);
         ok = 0;
     }
 
     return ok;
+}
+
+static uint8_t map_card_gid_to_tile(uint16_t gid)
+{
+    if (gid == 0 || gid > CARD_TILESET_MAX_GID) {
+        return FONT_SPACE_TILE;
+    }
+
+    if (card_gid_to_runtime[gid] == 0) {
+        return FONT_SPACE_TILE;
+    }
+
+    return card_gid_to_runtime[gid];
+}
+
+static uint8_t init_card_component_tiles(void)
+{
+    uint16_t gids[CARD_SHARED_TILE_CAPACITY];
+    uint8_t count = assets_collect_component_gids(gids, CARD_SHARED_TILE_CAPACITY);
+
+    memset(card_gid_to_runtime, 0, sizeof(card_gid_to_runtime));
+
+    if (count == 0) {
+        printf("Card tile init failed: no component GIDs collected\n");
+        return 0;
+    }
+
+    if (count > CARD_SHARED_TILE_CAPACITY) {
+        printf("Card tile init failed: component count %u exceeds capacity %u\n", count, CARD_SHARED_TILE_CAPACITY);
+        return 0;
+    }
+
+    for (uint8_t i = 0; i < count; i++) {
+        uint16_t gid = gids[i];
+        uint8_t runtime_tile = (uint8_t)(CARD_SHARED_TILE_BASE + i);
+
+        if (!validate_gid_range(gid, "card_component")) {
+            return 0;
+        }
+
+        if (load_source_tile(&vctx, gid, (uint16_t)runtime_tile * TILE_SIZE) != GFX_SUCCESS) {
+            printf("Card tile init failed: load GID %u\n", gid);
+            return 0;
+        }
+
+        card_gid_to_runtime[gid] = runtime_tile;
+    }
+
+    return 1;
 }
 
 static void load_ui_font_tiles(void)
@@ -339,59 +368,6 @@ static void render_layout(void)
     }
 }
 
-static void load_card_tiles_to_slot(uint8_t slot, uint8_t card)
-{
-    /* Each card is 3x4 tiles and each slot has its own destination tile block. */
-    uint8_t dst_base_tile = (uint8_t)(DST_TILE_BASE + (slot * (SRC_CARD_W * SRC_CARD_H)));
-    load_card_tiles(&vctx, card, (uint16_t)dst_base_tile * TILE_SIZE);
-}
-
-static void load_back_tiles_to_slot(uint8_t slot)
-{
-    /* Fixed 3x4 red-back card from your tileset (GIDs from cards.tmx layout). */
-    uint8_t dst_base_tile = (uint8_t)(DST_TILE_BASE + (slot * (SRC_CARD_W * SRC_CARD_H)));
-
-    for (uint8_t row = 0; row < SRC_CARD_H; row++) {
-        for (uint8_t col = 0; col < SRC_CARD_W; col++) {
-            uint8_t dst_tile = (uint8_t)(dst_base_tile + (row * SRC_CARD_W) + col);
-            load_source_tile(&vctx, kBackCardGids[row][col], (uint16_t)dst_tile * TILE_SIZE);
-        }
-    }
-}
-
-static void invalidate_slot_cache(void)
-{
-    /* VRAM slot contents are unknown after init/reset; force first upload on demand. */
-    for (uint8_t i = 0; i < CARD_COUNT; i++) {
-        slot_cache[i].valid = 0;
-        slot_cache[i].face_up = 0;
-        slot_cache[i].card = 0;
-    }
-}
-
-static void ensure_slot_tiles(uint8_t slot, uint8_t show_face, uint8_t card)
-{
-    SlotVisualCache* cache = &slot_cache[slot];
-
-    if (show_face) {
-        /* Upload face art only when slot content or mode changed. */
-        if (!cache->valid || !cache->face_up || cache->card != card) {
-            load_card_tiles_to_slot(slot, card);
-            cache->valid = 1;
-            cache->face_up = 1;
-            cache->card = card;
-        }
-    } else {
-        /* Upload back art only on transition from face/invalid to back. */
-        if (!cache->valid || cache->face_up) {
-            load_back_tiles_to_slot(slot);
-            cache->valid = 1;
-            cache->face_up = 0;
-            cache->card = 0;
-        }
-    }
-}
-
 static void mark_all_slots_dirty(void)
 {
     /* Used when phase/layout changes can affect all card slots at once. */
@@ -408,18 +384,26 @@ static void mark_slot_dirty(uint8_t slot)
     }
 }
 
-static void place_card_slot(uint8_t slot)
+static void place_gid_grid_at(uint8_t x0, uint8_t y0, const uint16_t grid[SRC_CARD_H][SRC_CARD_W])
 {
-    /* Blit the 3x4 tile block for one card to its table position. */
-    uint8_t x0 = slot_x[slot];
-    uint8_t dst_base_tile = (uint8_t)(DST_TILE_BASE + (slot * (SRC_CARD_W * SRC_CARD_H)));
-
     for (uint8_t row = 0; row < SRC_CARD_H; row++) {
         for (uint8_t col = 0; col < SRC_CARD_W; col++) {
-            uint8_t tile = (uint8_t)(dst_base_tile + (row * SRC_CARD_W) + col);
-            gfx_tilemap_place(&vctx, tile, TILEMAP_LAYER, (uint8_t)(x0 + col), (uint8_t)(slot_y + row));
+            uint16_t gid = grid[row][col];
+            uint8_t tile = map_card_gid_to_tile(gid);
+            gfx_tilemap_place(&vctx, tile, TILEMAP_LAYER, (uint8_t)(x0 + col), (uint8_t)(y0 + row));
         }
     }
+}
+
+static void draw_card_slot_direct(uint8_t slot, uint8_t show_face, uint8_t card)
+{
+    uint16_t grid[SRC_CARD_H][SRC_CARD_W];
+    if (show_face) {
+        assets_build_card_gid_grid(grid, card);
+    } else {
+        assets_build_back_gid_grid(grid);
+    }
+    place_gid_grid_at(slot_x[slot], slot_y, grid);
 }
 
 static void clear_card_slot(uint8_t slot)
@@ -703,7 +687,7 @@ void render_cards(void)
     /*
      * Draw only changed slots:
      * - avoids unnecessary tilemap writes
-     * - combined with ensure_slot_tiles() avoids redundant VRAM uploads
+     * - card visuals are composed directly from shared runtime tiles
      */
     for (uint8_t i = 0; i < CARD_COUNT; i++) {
         if (!full_redraw && !dirty_slots[i]) {
@@ -711,8 +695,7 @@ void render_cards(void)
         }
 
         if (reveal_mask & (uint8_t)(1U << i)) {
-            ensure_slot_tiles(i, show_card_faces, cards[i].card);
-            place_card_slot(i);
+            draw_card_slot_direct(i, show_card_faces, cards[i].card);
             /* Play card SFX exactly when the card is visually placed (sync fix). */
             if (reveal_sfx_pending_mask & (uint8_t)(1U << i)) {
                 play_card_place_sound();
@@ -1042,9 +1025,12 @@ void init(void)
         printf("Card composition tile validation failed. Check cards.gif tile mappings.\n");
         exit(1);
     }
+    if (!init_card_component_tiles()) {
+        printf("Card component tile preload failed.\n");
+        exit(1);
+    }
     load_ui_font_tiles();
     render_table();
-    invalidate_slot_cache();
     mark_all_slots_dirty();
 
     seed_rng_from_time();

@@ -50,8 +50,9 @@ If credits reach `0`, the game resets bankroll and returns to the bet phase.
 
 Main gameplay is in `src/videopoker.c`.
 
-- `init()`: input/video init, asset loading, map/font setup, first screen
+- `init()`: input/video init, asset loading, map/font setup, startup checks, shared card tile init
 - `validate_startup_tiles()`: validates critical UI/font/back GIDs at startup
+- `init_card_component_tiles()`: preloads unique reusable card component GIDs once into VRAM shared pool (`184..255`)
 - `update()`: state machine and controls (`BET`, `HOLD`, `RESULT`)
 - `draw()`: full or partial redraw synchronized with VBlank
 - `start_new_round()`: deduct bet, reseed RNG, shuffle, deal
@@ -59,16 +60,16 @@ Main gameplay is in `src/videopoker.c`.
 - `draw_hand()`: replace non-held cards, evaluate result, apply payout
 - `evaluate_hand()`: rank detection and multiplier selection
 - `render_layout()` / `render_cards()`: map/card/HUD/banner rendering
+- `draw_card_slot_direct()`: draws one 3x4 card by mapping a GID grid directly to shared runtime tiles
 - `shuffle_deck()` / `pop_deck()`: deck management (Fisher-Yates shuffle)
 - `start_reveal_sequence()` / `update_reveal_sequence()`: one-by-one card reveal timing
 - `play_card_place_sound()`: per-card SFX trigger during reveals
 - `set_win_banner_from_result()`: builds combo-specific win banner text
-- `ensure_slot_tiles()`: uploads slot graphics only when card/back content changes
 - `mark_slot_dirty()` / `mark_all_slots_dirty()`: incremental slot redraw control
 
 Supporting files:
 
-- `src/assets.c` / `src/assets.h`: palette/tile loading helpers + runtime card compositor
+- `src/assets.c` / `src/assets.h`: palette/tile loading helpers + runtime card compositor helpers
 - `src/layout_map.h`: generated TMX map header
 - `src/videopoker.h`: gameplay and rendering constants
 - `CARD_TILE_MAPPING.md`: single mapping reference for `cards.gif` positions and runtime GIDs
@@ -78,9 +79,10 @@ Supporting files:
 - Video mode: `ZVB_CTRL_VID_MODE_GFX_640_8BIT`
 - Each card is rendered as `3x4` tiles
 - UI layout is read from `cards.tmx` and generated into `layout_map.h`
-- Number card layouts (A..10) are table-driven via pip masks
+- Number card layouts (A..10) are table-driven via `kPipMaskByRank`
 - Pip/face placement uses PDF-style named positions (`TOP_LEFT`, `MIDDLE1_CENTRE`, etc.)
 - Suit color is explicit via `kSuitColorBySuit[]` (no implicit suit-order assumption)
+- Cards are not uploaded per-slot anymore: card components are shared in VRAM and tilemap-composed per draw
 
 ## Audio Implementation
 
@@ -96,7 +98,7 @@ Audio lifecycle in code:
 
 Audio sync fix:
 
-- Reveal logic now marks a per-slot pending SFX flag.
+- Reveal logic marks a per-slot pending SFX flag.
 - The SFX is triggered in `render_cards()` exactly when the corresponding slot is actually placed.
 - This keeps audio and visual card placement aligned on real hardware timing.
 
@@ -108,38 +110,20 @@ Current hardware-tuned defaults:
 - `CARD_SFX_DURATION = 1`
 - `CARD_REVEAL_DELAY = 4`
 
-### Current tunable audio parameters
-
-Defined near the top of `src/videopoker.c`:
-
-- `CARD_SFX_WAVEFORM`: waveform (`WAV_SQUARE`, `WAV_TRIANGLE`, `WAV_SAWTOOTH`, `WAV_NOISE`)
-- `CARD_SFX_BASE_FREQ`: base pitch/frequency passed to `sound_play`
-- `CARD_SFX_JITTER_MASK`: random variation mask for humanized repeated taps
-- `CARD_SFX_DURATION`: sound length
-- `CARD_REVEAL_DELAY`: timing between consecutive cards in reveal sequence
-
-In practice:
-
-- Lower `CARD_SFX_BASE_FREQ` and slightly longer `CARD_SFX_DURATION` feel more like a soft desk tap.
-- Higher `CARD_REVEAL_DELAY` makes dealing slower and more deliberate.
-- Larger `CARD_SFX_JITTER_MASK` adds more variation between card hits.
-
 ## Performance Optimizations (Real Hardware)
 
-The game now includes three targeted optimizations for Zeal hardware:
+1. **Shared card-component tile pool**
+   - Unique card component GIDs are preloaded once at startup.
+   - During gameplay, cards are drawn by tilemap placement only.
+   - Eliminates repeated per-slot 12-tile uploads.
 
-1. **Slot visual caching (Step 1)**
-   - `SlotVisualCache` tracks what is already loaded in each card slot.
-   - `ensure_slot_tiles()` prevents redundant re-upload of unchanged face/back graphics.
-
-2. **Per-slot dirty rendering (Step 2)**
+2. **Per-slot dirty rendering**
    - `dirty_slots[]` + `full_redraw` allow incremental card redraw.
    - Only changed slots are processed during reveal/deal/draw transitions.
 
-3. **Persistent asset stream reuse (Step 3)**
-   - `assets.c` keeps `cards.zts` stream open and tracks current offset.
-   - This avoids repeated `open/close/seek` overhead for each tile load.
-   - `assets_shutdown()` closes the stream in `deinit()`.
+3. **Persistent asset stream reuse (`assets.c`)**
+   - `cards.zts` stream is reused and cursor-tracked.
+   - Avoids repeated open/close/seek overhead for source tile loading.
 
 ## Safety Guards
 
@@ -150,6 +134,7 @@ The game now includes three targeted optimizations for Zeal hardware:
   - suit tiles
   - red/black rank glyph strips
   - J/Q/K face fragment tables
+  - white card tile and back-card matrix
 
 ## Accreditation
 

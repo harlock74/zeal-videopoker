@@ -107,6 +107,14 @@ static const QueenFace kQueenFaceByColor[2] = {
     {8, 48, 49, 50, 89, 90, 91}, /* Black Q */
 };
 
+/* Fixed 3x4 red-back card layout from cards.gif/cards.tmx. */
+static const uint16_t kBackCardGids[CARD_TILE_H][CARD_TILE_W] = {
+    {39, 40, 41},
+    {80, 81, 82},
+    {121, 122, 123},
+    {162, 163, 164},
+};
+
 /*
  * Reusable stream state to avoid repeated open/close/seek churn.
  * This is especially important on real hardware where storage I/O latency dominates.
@@ -413,21 +421,14 @@ static void set_face_figure(
     }
 }
 
-gfx_error load_card_tiles(gfx_context* ctx, uint8_t card, uint16_t dst_from_byte)
+static void build_card_gid_grid_internal(uint16_t grid[CARD_TILE_H][CARD_TILE_W], uint8_t card)
 {
-    /*
-     * cards.gif now stores reusable components (rank glyphs/suit pips/figure parts),
-     * so each 3x4 card face is composed tile-by-tile at load time.
-     */
     uint8_t rank = (uint8_t)(card % 13U);
     uint8_t suit = (uint8_t)((card / 13U) % CARD_SUIT_COUNT);
     uint8_t color = kSuitColorBySuit[suit];
     uint8_t black = (color == COLOR_BLACK);
-    uint16_t grid[CARD_TILE_H][CARD_TILE_W];
 
     init_card_grid(grid, kWhiteCardTileGid);
-
-    /* Rank glyph in top-left cell, color by suit family. */
     set_card_pos(grid, TOP_LEFT, black ? kRankGlyphBlack[rank] : kRankGlyphRed[rank]);
 
     if (rank < RANK_JACK) {
@@ -435,6 +436,91 @@ gfx_error load_card_tiles(gfx_context* ctx, uint8_t card, uint16_t dst_from_byte
     } else {
         set_face_figure(grid, rank, black, kSuitGidBySuit[suit]);
     }
+}
+
+void assets_build_card_gid_grid(uint16_t grid[4][3], uint8_t card)
+{
+    build_card_gid_grid_internal(grid, card);
+}
+
+void assets_build_back_gid_grid(uint16_t grid[4][3])
+{
+    for (uint8_t row = 0; row < CARD_TILE_H; row++) {
+        for (uint8_t col = 0; col < CARD_TILE_W; col++) {
+            grid[row][col] = kBackCardGids[row][col];
+        }
+    }
+}
+
+static void append_unique_gid(uint16_t gid, uint16_t* out_gids, uint8_t max_count, uint8_t* count, uint8_t* overflow)
+{
+    if (*count >= max_count) {
+        *overflow = 1;
+        return;
+    }
+
+    for (uint8_t i = 0; i < *count; i++) {
+        if (out_gids[i] == gid) {
+            return;
+        }
+    }
+
+    out_gids[*count] = gid;
+    (*count)++;
+}
+
+uint8_t assets_collect_component_gids(uint16_t* out_gids, uint8_t max_count)
+{
+    uint8_t count = 0;
+    uint8_t overflow = 0;
+
+    append_unique_gid(kWhiteCardTileGid, out_gids, max_count, &count, &overflow);
+
+    for (uint8_t i = 0; i < CARD_SUIT_COUNT; i++) {
+        append_unique_gid(kSuitGidBySuit[i], out_gids, max_count, &count, &overflow);
+    }
+
+    for (uint8_t i = 0; i < CARD_RANK_COUNT; i++) {
+        append_unique_gid(kRankGlyphRed[i], out_gids, max_count, &count, &overflow);
+        append_unique_gid(kRankGlyphBlack[i], out_gids, max_count, &count, &overflow);
+    }
+
+    for (uint8_t c = 0; c < 2; c++) {
+        append_unique_gid(kJackFaceByColor[c].top, out_gids, max_count, &count, &overflow);
+        append_unique_gid(kJackFaceByColor[c].mid, out_gids, max_count, &count, &overflow);
+        append_unique_gid(kJackFaceByColor[c].bottom, out_gids, max_count, &count, &overflow);
+
+        append_unique_gid(kKingFaceByColor[c].top, out_gids, max_count, &count, &overflow);
+        append_unique_gid(kKingFaceByColor[c].mid, out_gids, max_count, &count, &overflow);
+        append_unique_gid(kKingFaceByColor[c].bottom, out_gids, max_count, &count, &overflow);
+
+        append_unique_gid(kQueenFaceByColor[c].top, out_gids, max_count, &count, &overflow);
+        append_unique_gid(kQueenFaceByColor[c].mid_left, out_gids, max_count, &count, &overflow);
+        append_unique_gid(kQueenFaceByColor[c].mid_center, out_gids, max_count, &count, &overflow);
+        append_unique_gid(kQueenFaceByColor[c].mid_right, out_gids, max_count, &count, &overflow);
+        append_unique_gid(kQueenFaceByColor[c].bottom_left, out_gids, max_count, &count, &overflow);
+        append_unique_gid(kQueenFaceByColor[c].bottom_center, out_gids, max_count, &count, &overflow);
+        append_unique_gid(kQueenFaceByColor[c].bottom_right, out_gids, max_count, &count, &overflow);
+    }
+
+    for (uint8_t row = 0; row < CARD_TILE_H; row++) {
+        for (uint8_t col = 0; col < CARD_TILE_W; col++) {
+            append_unique_gid(kBackCardGids[row][col], out_gids, max_count, &count, &overflow);
+        }
+    }
+
+    return overflow ? 0 : count;
+}
+
+gfx_error load_card_tiles(gfx_context* ctx, uint8_t card, uint16_t dst_from_byte)
+{
+    /*
+     * cards.gif now stores reusable components (rank glyphs/suit pips/figure parts),
+     * so each 3x4 card face is composed tile-by-tile at load time.
+     */
+    uint16_t grid[CARD_TILE_H][CARD_TILE_W];
+
+    build_card_gid_grid_internal(grid, card);
 
     for (uint8_t row = 0; row < CARD_TILE_H; row++) {
         for (uint8_t col = 0; col < CARD_TILE_W; col++) {
