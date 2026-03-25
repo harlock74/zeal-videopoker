@@ -95,6 +95,8 @@ static uint8_t mapped_count = 0;
 static uint8_t card_gid_to_runtime[CARD_TILESET_MAX_GID + 1];
 /* One-shot diagnostics if a GID ever falls back at runtime. */
 static uint8_t card_gid_missing_warned[CARD_TILESET_MAX_GID + 1];
+/* Cached splash background tile (layer 0) for space/fallback characters. */
+static uint8_t splash_bg_tile = FONT_SPACE_TILE;
 
 /* Position of each playable card slot (top-left tile of 3x4 card). */
 static const uint8_t slot_x[CARD_COUNT] = {5, 12, 19, 26, 33};
@@ -120,6 +122,11 @@ static const uint16_t kAlphaAGidBase = 175;
 static const uint16_t kAlphaNGidBase = 188;
 static const uint16_t kColonGid = 201;
 static const uint16_t kExclGid = 202;
+/* Splash border fiche 2x2 source GIDs (+1 from Tiled local tile IDs). */
+static const uint16_t kSplashChipTL = 106; /* Tiled ID 105 */
+static const uint16_t kSplashChipTR = 107; /* Tiled ID 106 */
+static const uint16_t kSplashChipBL = 147; /* Tiled ID 146 */
+static const uint16_t kSplashChipBR = 148; /* Tiled ID 147 */
 
 static void restart_if_credit_low(void);
 static void return_to_bet_phase(void);
@@ -133,6 +140,11 @@ static void mark_slot_dirty(uint8_t slot);
 static uint8_t validate_startup_tiles(void);
 static uint8_t init_card_component_tiles(void);
 static uint8_t verify_card_component_coverage(void);
+static uint8_t ensure_map_gid_loaded(uint16_t gid);
+static void place_gid_grid_at(uint8_t x0, uint8_t y0, const uint16_t grid[SRC_CARD_H][SRC_CARD_W]);
+static void render_splash_screen(void);
+static void run_splash_blocking(void);
+static void poll_keys(KeyEvents* ev);
 
 /* Card IDs are 0..51, grouped by suits in blocks of 13. */
 static uint8_t card_rank(uint8_t card)
@@ -218,6 +230,30 @@ static uint8_t map_card_gid_to_tile(uint16_t gid)
     }
 
     return card_gid_to_runtime[gid];
+}
+
+static uint8_t ensure_map_gid_loaded(uint16_t gid)
+{
+    for (uint8_t i = 0; i < mapped_count; i++) {
+        if (mapped_gids[i] == gid) {
+            return 1;
+        }
+    }
+
+    if (mapped_count >= MAP_TILE_CAPACITY) {
+        printf("Map tile remap full, cannot add splash GID %u\n", gid);
+        return 0;
+    }
+
+    mapped_gids[mapped_count] = gid;
+    mapped_tiles[mapped_count] = (uint8_t)(MAP_TILE_BASE + mapped_count);
+    if (load_source_tile(&vctx, gid, (uint16_t)mapped_tiles[mapped_count] * TILE_SIZE) != GFX_SUCCESS) {
+        printf("Failed to load splash GID %u\n", gid);
+        return 0;
+    }
+
+    mapped_count++;
+    return 1;
 }
 
 static uint8_t init_card_component_tiles(void)
@@ -331,6 +367,150 @@ static void load_ui_font_tiles(void)
     ascii_map('n', 13, FONT_ALPHA_N_TILE);  // N-Z
     ascii_map(':', 1, FONT_COLON_TILE);
     ascii_map('!', 1, FONT_EXCL_TILE);
+}
+
+static uint8_t splash_char_tile(char c)
+{
+    if (c >= '0' && c <= '9') {
+        return (uint8_t)(FONT_DIGIT_TILE + (c - '0'));
+    }
+    if (c >= 'A' && c <= 'M') {
+        return (uint8_t)(FONT_ALPHA_A_TILE + (c - 'A'));
+    }
+    if (c >= 'N' && c <= 'Z') {
+        return (uint8_t)(FONT_ALPHA_N_TILE + (c - 'N'));
+    }
+    if (c >= 'a' && c <= 'm') {
+        return (uint8_t)(FONT_ALPHA_A_TILE + (c - 'a'));
+    }
+    if (c >= 'n' && c <= 'z') {
+        return (uint8_t)(FONT_ALPHA_N_TILE + (c - 'n'));
+    }
+    if (c == ':') {
+        return FONT_COLON_TILE;
+    }
+    if (c == '!') {
+        return FONT_EXCL_TILE;
+    }
+    return splash_bg_tile;
+}
+
+static void draw_splash_text_layer0(const char* text, uint8_t x, uint8_t y)
+{
+    uint8_t len = (uint8_t)strlen(text);
+    for (uint8_t i = 0; i < len; i++) {
+        uint8_t tile = splash_char_tile(text[i]);
+        gfx_tilemap_place(&vctx, tile, TILEMAP_LAYER, (uint8_t)(x + i), y);
+    }
+}
+
+static void render_splash_screen(void)
+{
+    static const char title[] = "ZEAL VIDEO POKER";
+    static const char prompt[] = "PRESS ENTER TO PLAY";
+    static const uint8_t showcase_cards[5] = {
+        9,  /* 10 of hearts */
+        10, /* J of hearts */
+        11, /* Q of hearts */
+        12, /* K of hearts */
+        0   /* A of hearts */
+    };
+    static const uint8_t showcase_x[5] = {7, 12, 18, 24, 30};
+    static const uint8_t showcase_y = 18;
+    uint16_t space_gid = kLayoutGids[(hold_y * LAYOUT_W) + LAYOUT_SPACE_SAMPLE_X];
+    uint8_t bg_tile = map_gid_to_tile(space_gid);
+    uint8_t title_x = (uint8_t)((SCREEN_TILE_W - (uint8_t)strlen(title)) / 2);
+    uint8_t prompt_x = (uint8_t)((SCREEN_TILE_W - (uint8_t)strlen(prompt)) / 2);
+    const uint8_t border_off_x = 2;
+    const uint8_t border_off_y = 2;
+    const uint8_t x_first = border_off_x;
+    const uint8_t y_first = border_off_y;
+    const uint8_t x_last = (uint8_t)(SCREEN_TILE_W - border_off_x - 2);
+    const uint8_t y_last = (uint8_t)(SCREEN_TILE_H - border_off_y - 2);
+    uint8_t chip_tl = map_gid_to_tile(kSplashChipTL);
+    uint8_t chip_tr = map_gid_to_tile(kSplashChipTR);
+    uint8_t chip_bl = map_gid_to_tile(kSplashChipBL);
+    uint8_t chip_br = map_gid_to_tile(kSplashChipBR);
+    splash_bg_tile = bg_tile;
+
+    for (uint8_t y = 0; y < SCREEN_TILE_H; y++) {
+        for (uint8_t x = 0; x < SCREEN_TILE_W; x++) {
+            gfx_tilemap_place(&vctx, bg_tile, TILEMAP_LAYER, x, y);
+        }
+    }
+
+    /* Draw one 2x2 fiche block helper inline: TL/TR over BL/BR. */
+#define DRAW_SPLASH_CHIP(_x, _y) \
+    do { \
+        gfx_tilemap_place(&vctx, chip_tl, TILEMAP_LAYER, (_x), (_y)); \
+        gfx_tilemap_place(&vctx, chip_tr, TILEMAP_LAYER, (uint8_t)((_x) + 1), (_y)); \
+        gfx_tilemap_place(&vctx, chip_bl, TILEMAP_LAYER, (_x), (uint8_t)((_y) + 1)); \
+        gfx_tilemap_place(&vctx, chip_br, TILEMAP_LAYER, (uint8_t)((_x) + 1), (uint8_t)((_y) + 1)); \
+    } while (0)
+
+    /* Top and bottom borders as full 2x2 repeated blocks. */
+    for (uint8_t x = x_first; x <= x_last; x += 2) {
+        DRAW_SPLASH_CHIP(x, y_first);
+        DRAW_SPLASH_CHIP(x, y_last);
+    }
+
+    /* Left and right borders (excluding corners already drawn above). */
+    for (uint8_t y = (uint8_t)(y_first + 2); y <= (uint8_t)(y_last - 2); y += 2) {
+        DRAW_SPLASH_CHIP(x_first, y);
+        DRAW_SPLASH_CHIP(x_last, y);
+    }
+
+#undef DRAW_SPLASH_CHIP
+
+    draw_splash_text_layer0(title, title_x, 10);
+    draw_splash_text_layer0(prompt, prompt_x, 13);
+
+    /* Showcase hand centered in splash screen. */
+    for (uint8_t i = 0; i < 5; i++) {
+        uint16_t grid[SRC_CARD_H][SRC_CARD_W];
+        assets_build_card_gid_grid(grid, showcase_cards[i]);
+        place_gid_grid_at(showcase_x[i], showcase_y, grid);
+    }
+}
+
+static void run_splash_blocking(void)
+{
+    KeyEvents ev;
+
+    /* Start from a clean input state so first press is always accepted. */
+    keyboard_flush();
+    controller_flush();
+
+    while (1) {
+        sound_loop();
+        poll_keys(&ev);
+        entropy++;
+
+        if (ev.quit) {
+            deinit();
+            exit(0);
+        }
+
+        if (ev.enter || ev.space) {
+            break;
+        }
+
+        gfx_wait_vblank(&vctx);
+        gfx_wait_end_vblank(&vctx);
+    }
+
+    msleep(40);
+    while (1) {
+        poll_keys(&ev);
+        if (!ev.enter && !ev.space) {
+            break;
+        }
+        gfx_wait_vblank(&vctx);
+        gfx_wait_end_vblank(&vctx);
+    }
+
+    keyboard_flush();
+    controller_flush();
 }
 
 /* Restore one map cell from original TMX layout (used to erase overlays). */
@@ -1037,7 +1217,7 @@ static void poll_keys(KeyEvents* ev)
 
 void init(void)
 {
-    /* Initialize input, graphics mode, assets, and initial BET screen state. */
+    /* Initialize input, graphics mode, assets, then block on splash screen. */
     zos_err_t err = input_init(true);
     if (err != ERR_SUCCESS) {
         printf("Input init failed: %d\n", err);
@@ -1065,6 +1245,13 @@ void init(void)
     }
 
     init_layout_tiles();
+    if (!ensure_map_gid_loaded(kSplashChipTL) ||
+        !ensure_map_gid_loaded(kSplashChipTR) ||
+        !ensure_map_gid_loaded(kSplashChipBL) ||
+        !ensure_map_gid_loaded(kSplashChipBR)) {
+        printf("Failed to initialize splash border tiles.\n");
+        exit(1);
+    }
     if (!validate_startup_tiles()) {
         printf("Critical tile validation failed. Check cards.gif/cards.tsx/cards.tmx.\n");
         exit(1);
@@ -1082,6 +1269,10 @@ void init(void)
         exit(1);
     }
     load_ui_font_tiles();
+    render_splash_screen();
+    gfx_enable_screen(1);
+    run_splash_blocking();
+
     render_table();
     mark_all_slots_dirty();
 
@@ -1095,8 +1286,6 @@ void init(void)
     render_cards();
     needs_redraw = 0;
     needs_hud_redraw = 0;
-
-    gfx_enable_screen(1);
 }
 
 void deinit(void)
