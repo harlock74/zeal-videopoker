@@ -67,6 +67,8 @@ static uint8_t reveal_cooldown = 0;
 static uint8_t reveal_active = 0;
 /* Per-slot one-shot SFX trigger, consumed in render_cards() when slot is drawn. */
 static uint8_t reveal_sfx_pending_mask = 0;
+/* Deferred game-over transition to splash/reset, executed safely in update(). */
+static uint8_t pending_bankrupt_reset = 0;
 
 /* Snapshot of key events for one update tick. */
 typedef struct {
@@ -97,6 +99,8 @@ static uint8_t card_gid_to_runtime[CARD_TILESET_MAX_GID + 1];
 static uint8_t card_gid_missing_warned[CARD_TILESET_MAX_GID + 1];
 /* Cached splash background tile (layer 0) for space/fallback characters. */
 static uint8_t splash_bg_tile = FONT_SPACE_TILE;
+/* Layer1 clear tile (transparent/empty). */
+static const uint8_t overlay_empty_tile = 0;
 
 /* Position of each playable card slot (top-left tile of 3x4 card). */
 static const uint8_t slot_x[CARD_COUNT] = {5, 12, 19, 26, 33};
@@ -137,11 +141,16 @@ static void play_card_place_sound(void);
 static void set_win_banner_from_result(const HandResult* result);
 static void mark_all_slots_dirty(void);
 static void mark_slot_dirty(uint8_t slot);
+static void perform_bankrupt_reset_with_splash(void);
+static void clamp_bet_to_credits(void);
 static uint8_t validate_startup_tiles(void);
 static uint8_t init_card_component_tiles(void);
 static uint8_t verify_card_component_coverage(void);
 static uint8_t ensure_map_gid_loaded(uint16_t gid);
 static void place_gid_grid_at(uint8_t x0, uint8_t y0, const uint16_t grid[SRC_CARD_H][SRC_CARD_W]);
+static void clear_overlay_layer1(void);
+static void draw_splash_chip_block(uint8_t x, uint8_t y, uint8_t chip_tl, uint8_t chip_tr, uint8_t chip_bl, uint8_t chip_br);
+static void draw_splash_border(void);
 static void render_splash_screen(void);
 static void run_splash_blocking(void);
 static void poll_keys(KeyEvents* ev);
@@ -359,7 +368,11 @@ static void load_ui_font_tiles(void)
     load_source_tile(&vctx, kColonGid, (uint16_t)FONT_COLON_TILE * TILE_SIZE);
     load_source_tile(&vctx, kExclGid, (uint16_t)FONT_EXCL_TILE * TILE_SIZE);
 
-    ascii_map(' ', 1, FONT_SPACE_TILE);
+    /*
+     * nprint_string writes to layer 1; use transparent/empty tile for spaces
+     * so clearing text does not leave blue artifacts on splash/game screens.
+     */
+    ascii_map(' ', 1, overlay_empty_tile);
     ascii_map('0', 10, FONT_DIGIT_TILE);    // 0-9
     ascii_map('A', 13, FONT_ALPHA_A_TILE);  // A-M
     ascii_map('a', 13, FONT_ALPHA_A_TILE);  // A-M
@@ -367,6 +380,12 @@ static void load_ui_font_tiles(void)
     ascii_map('n', 13, FONT_ALPHA_N_TILE);  // N-Z
     ascii_map(':', 1, FONT_COLON_TILE);
     ascii_map('!', 1, FONT_EXCL_TILE);
+}
+
+static void clear_overlay_layer1(void)
+{
+    /* Clear layer1 (usually has garbage at init / after transitions). */
+    tilemap_fill(&vctx, LAYER1, overlay_empty_tile, 0, 0, SCREEN_TILE_W, SCREEN_TILE_H);
 }
 
 static uint8_t splash_char_tile(char c)
@@ -404,10 +423,43 @@ static void draw_splash_text_layer0(const char* text, uint8_t x, uint8_t y)
     }
 }
 
+static void draw_splash_chip_block(uint8_t x, uint8_t y, uint8_t chip_tl, uint8_t chip_tr, uint8_t chip_bl, uint8_t chip_br)
+{
+    gfx_tilemap_place(&vctx, chip_tl, TILEMAP_LAYER, x, y);
+    gfx_tilemap_place(&vctx, chip_tr, TILEMAP_LAYER, (uint8_t)(x + 1), y);
+    gfx_tilemap_place(&vctx, chip_bl, TILEMAP_LAYER, x, (uint8_t)(y + 1));
+    gfx_tilemap_place(&vctx, chip_br, TILEMAP_LAYER, (uint8_t)(x + 1), (uint8_t)(y + 1));
+}
+
+static void draw_splash_border(void)
+{
+    const uint8_t border_off_x = 2;
+    const uint8_t border_off_y = 2;
+    const uint8_t x_first = border_off_x;
+    const uint8_t y_first = border_off_y;
+    const uint8_t x_last = (uint8_t)(SCREEN_TILE_W - border_off_x - 2);
+    /* Bottom row is one tile lower than before, as requested. */
+    const uint8_t y_last = (uint8_t)(SCREEN_TILE_H - border_off_y - 2);
+    const uint8_t chip_tl = map_gid_to_tile(kSplashChipTL);
+    const uint8_t chip_tr = map_gid_to_tile(kSplashChipTR);
+    const uint8_t chip_bl = map_gid_to_tile(kSplashChipBL);
+    const uint8_t chip_br = map_gid_to_tile(kSplashChipBR);
+
+    for (uint8_t x = x_first; x <= x_last; x = (uint8_t)(x + 2)) {
+        draw_splash_chip_block(x, y_first, chip_tl, chip_tr, chip_bl, chip_br);
+        draw_splash_chip_block(x, y_last, chip_tl, chip_tr, chip_bl, chip_br);
+    }
+
+    for (uint8_t y = y_first; y <= (uint8_t)(y_last - 2); y = (uint8_t)(y + 2)) {
+        draw_splash_chip_block(x_first, y, chip_tl, chip_tr, chip_bl, chip_br);
+        draw_splash_chip_block(x_last, y, chip_tl, chip_tr, chip_bl, chip_br);
+    }
+}
+
 static void render_splash_screen(void)
 {
     static const char title[] = "ZEAL VIDEO POKER";
-    static const char prompt[] = "PRESS ENTER TO PLAY";
+    static const char prompt[] = "PRESS ENTER TO PLAY!";
     static const uint8_t showcase_cards[5] = {
         9,  /* 10 of hearts */
         10, /* J of hearts */
@@ -421,46 +473,15 @@ static void render_splash_screen(void)
     uint8_t bg_tile = map_gid_to_tile(space_gid);
     uint8_t title_x = (uint8_t)((SCREEN_TILE_W - (uint8_t)strlen(title)) / 2);
     uint8_t prompt_x = (uint8_t)((SCREEN_TILE_W - (uint8_t)strlen(prompt)) / 2);
-    const uint8_t border_off_x = 2;
-    const uint8_t border_off_y = 2;
-    const uint8_t x_first = border_off_x;
-    const uint8_t y_first = border_off_y;
-    const uint8_t x_last = (uint8_t)(SCREEN_TILE_W - border_off_x - 2);
-    const uint8_t y_last = (uint8_t)(SCREEN_TILE_H - border_off_y - 2);
-    uint8_t chip_tl = map_gid_to_tile(kSplashChipTL);
-    uint8_t chip_tr = map_gid_to_tile(kSplashChipTR);
-    uint8_t chip_bl = map_gid_to_tile(kSplashChipBL);
-    uint8_t chip_br = map_gid_to_tile(kSplashChipBR);
     splash_bg_tile = bg_tile;
+
+    clear_overlay_layer1();
 
     for (uint8_t y = 0; y < SCREEN_TILE_H; y++) {
         for (uint8_t x = 0; x < SCREEN_TILE_W; x++) {
             gfx_tilemap_place(&vctx, bg_tile, TILEMAP_LAYER, x, y);
         }
     }
-
-    /* Draw one 2x2 fiche block helper inline: TL/TR over BL/BR. */
-#define DRAW_SPLASH_CHIP(_x, _y) \
-    do { \
-        gfx_tilemap_place(&vctx, chip_tl, TILEMAP_LAYER, (_x), (_y)); \
-        gfx_tilemap_place(&vctx, chip_tr, TILEMAP_LAYER, (uint8_t)((_x) + 1), (_y)); \
-        gfx_tilemap_place(&vctx, chip_bl, TILEMAP_LAYER, (_x), (uint8_t)((_y) + 1)); \
-        gfx_tilemap_place(&vctx, chip_br, TILEMAP_LAYER, (uint8_t)((_x) + 1), (uint8_t)((_y) + 1)); \
-    } while (0)
-
-    /* Top and bottom borders as full 2x2 repeated blocks. */
-    for (uint8_t x = x_first; x <= x_last; x += 2) {
-        DRAW_SPLASH_CHIP(x, y_first);
-        DRAW_SPLASH_CHIP(x, y_last);
-    }
-
-    /* Left and right borders (excluding corners already drawn above). */
-    for (uint8_t y = (uint8_t)(y_first + 2); y <= (uint8_t)(y_last - 2); y += 2) {
-        DRAW_SPLASH_CHIP(x_first, y);
-        DRAW_SPLASH_CHIP(x_last, y);
-    }
-
-#undef DRAW_SPLASH_CHIP
 
     draw_splash_text_layer0(title, title_x, 10);
     draw_splash_text_layer0(prompt, prompt_x, 13);
@@ -471,38 +492,58 @@ static void render_splash_screen(void)
         assets_build_card_gid_grid(grid, showcase_cards[i]);
         place_gid_grid_at(showcase_x[i], showcase_y, grid);
     }
+
+    /* Draw border last so splash cards/text cannot overwrite chips. */
+    draw_splash_border();
 }
 
 static void run_splash_blocking(void)
 {
-    KeyEvents ev;
-
     /* Start from a clean input state so first press is always accepted. */
     keyboard_flush();
     controller_flush();
 
     while (1) {
+        uint8_t buf[32];
+        uint16_t size = sizeof(buf);
+
         sound_loop();
-        poll_keys(&ev);
         entropy++;
+        draw_splash_border();
 
-        if (ev.quit) {
-            deinit();
-            exit(0);
-        }
-
-        if (ev.enter || ev.space) {
-            break;
+        if (read(DEV_STDIN, buf, &size) == ERR_SUCCESS && size > 0) {
+            for (uint16_t i = 0; i < size; i++) {
+                uint8_t key = buf[i];
+                if (key == KB_KEY_ENTER || key == KB_KEY_SPACE) {
+                    goto splash_pressed;
+                }
+                if (key == KB_KEY_QUOTE || key == KB_RIGHT_SHIFT) {
+                    deinit();
+                    exit(0);
+                }
+            }
         }
 
         gfx_wait_vblank(&vctx);
         gfx_wait_end_vblank(&vctx);
     }
 
+splash_pressed:
     msleep(40);
     while (1) {
-        poll_keys(&ev);
-        if (!ev.enter && !ev.space) {
+        uint8_t buf[16];
+        uint16_t size = sizeof(buf);
+        uint8_t held = 0;
+
+        if (read(DEV_STDIN, buf, &size) == ERR_SUCCESS && size > 0) {
+            for (uint16_t i = 0; i < size; i++) {
+                if (buf[i] == KB_KEY_ENTER || buf[i] == KB_KEY_SPACE) {
+                    held = 1;
+                    break;
+                }
+            }
+        }
+        if (!held) {
             break;
         }
         gfx_wait_vblank(&vctx);
@@ -641,15 +682,6 @@ static void clear_card_slot(uint8_t slot)
         for (uint8_t col = 0; col < SRC_CARD_W; col++) {
             restore_map_cell((uint8_t)(x0 + col), (uint8_t)(slot_y + row));
         }
-    }
-}
-
-static void restore_hold_background(uint8_t slot)
-{
-    /* Keep helper in case per-slot text clears are needed again. */
-    for (uint8_t col = 0; col < 4; col++) {
-        uint8_t x = (uint8_t)(hold_x[slot] + col);
-        restore_map_cell(x, hold_y);
     }
 }
 
@@ -1010,7 +1042,9 @@ static void start_new_round(void)
         rng_seeded = 1;
     }
 
-    if (credits == 0) {
+    if (credits == 0 || credits < bet) {
+        clamp_bet_to_credits();
+        needs_hud_redraw = 1;
         return;
     }
 
@@ -1125,10 +1159,40 @@ static void play_card_place_sound(void)
 
 static void restart_if_credit_low(void)
 {
-    /* Restart only when bankroll is exhausted, not after ordinary losses. */
+    /* Defer game-over reset to update() to avoid state/input side effects in draw_hand(). */
     if (credits > 0) {
         return;
     }
+    pending_bankrupt_reset = 1;
+}
+
+static void clamp_bet_to_credits(void)
+{
+    /*
+     * Keep bet valid for bankroll and configured limits:
+     * 1 <= bet <= MAX_BET and bet <= credits when credits > 0.
+     */
+    if (credits == 0) {
+        bet = 1;
+        return;
+    }
+
+    if (bet < 1) {
+        bet = 1;
+    }
+    if (bet > MAX_BET) {
+        bet = MAX_BET;
+    }
+    if (bet > credits) {
+        bet = (uint8_t)credits;
+    }
+}
+
+static void perform_bankrupt_reset_with_splash(void)
+{
+    render_splash_screen();
+    run_splash_blocking();
+    render_table();
 
     credits = RESET_CREDITS;
     bet = 1;
@@ -1140,11 +1204,14 @@ static void restart_if_credit_low(void)
     start_reveal_sequence(all_slots, CARD_COUNT, 0);
     mark_all_slots_dirty();
     suppress_enter_ticks = 8;
+    confirm_armed = 0;
 
     shuffle_deck();
     state = STATE_BET;
-    needs_redraw = 1;
+    render_cards();
+    needs_redraw = 0;
     needs_hud_redraw = 0;
+    pending_bankrupt_reset = 0;
 }
 
 static void return_to_bet_phase(void)
@@ -1161,6 +1228,7 @@ static void return_to_bet_phase(void)
     start_reveal_sequence(all_slots, CARD_COUNT, 0);
     mark_all_slots_dirty();
     state = STATE_BET;
+    clamp_bet_to_credits();
     suppress_enter_ticks = 8;
     needs_redraw = 1;
     needs_hud_redraw = 0;
@@ -1231,6 +1299,8 @@ void init(void)
         printf("GFX init failed: %d\n", err);
         exit(1);
     }
+
+    clear_overlay_layer1();
 
     err = load_cards_palette(&vctx);
     if (err != GFX_SUCCESS) {
@@ -1319,6 +1389,11 @@ void update(void)
         exit(0);
     }
 
+    if (pending_bankrupt_reset) {
+        perform_bankrupt_reset_with_splash();
+        return;
+    }
+
     if (state == STATE_HOLD) {
         if (reveal_active) {
             return;
@@ -1367,7 +1442,7 @@ void update(void)
             bet--;
             needs_hud_redraw = 1;
         }
-        if ((ev.enter || ev.space) && suppress_enter_ticks == 0 && confirm_armed) {
+        if ((ev.enter || ev.space) && suppress_enter_ticks == 0 && confirm_armed && credits >= bet) {
             confirm_armed = 0;
             start_new_round();
         }
@@ -1401,6 +1476,4 @@ int main(void)
         draw();
         gfx_wait_end_vblank(&vctx);
     }
-
-    return 0;
 }

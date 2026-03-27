@@ -25,7 +25,8 @@ Video Poker for Zeal 8-bit Computer.
    - Press `ENTER` or `SPACE` to continue.
    - Card backs are shown again, ready for next hand.
 
-If credits reach `0`, the game resets bankroll and returns to the bet phase.
+If credits reach `0`, the game returns to the splash screen, waits for `ENTER/SPACE`,
+then resets bankroll and re-enters the bet phase.
 
 ## Controls
 
@@ -57,6 +58,7 @@ Main gameplay is in `src/videopoker.c`.
 - `update()`: state machine and controls (`BET`, `HOLD`, `RESULT`)
 - `draw()`: full or partial redraw synchronized with VBlank
 - `start_new_round()`: deduct bet, reseed RNG, shuffle, deal
+- `clamp_bet_to_credits()`: keeps bet valid (`1..MAX_BET` and never above credits)
 - `deal_hand()`: initial 5-card deal
 - `draw_hand()`: replace non-held cards, evaluate result, apply payout
 - `evaluate_hand()`: rank detection and multiplier selection
@@ -141,6 +143,18 @@ Current hardware-tuned defaults:
   - all 52 generated face card grids
   - back-card grid
   - startup aborts if any required GID is missing from `card_gid_to_runtime[]`
+- Bet underflow guard:
+  - round start is blocked unless `credits >= bet`
+  - bet is clamped when returning to BET phase, preventing `uint16_t` wraparound
+
+## Splash Screen Notes
+
+- Splash is blocking (`ENTER/SPACE` to continue).
+- Border chips use dedicated splash GIDs and are drawn last to avoid overwrite artifacts.
+- On game-over (`credits == 0`), splash is shown again before bankroll reset.
+- Layer1 (text overlay) is explicitly cleared at init and at splash render time.
+- Space character mapping for `nprint_string()` uses an empty overlay tile, so text clears do not leave blue bars/garbage tiles.
+- Previous per-field splash text clear helper was removed as redundant after full Layer1 clear.
 
 ## Accreditation
 
