@@ -16,15 +16,18 @@
 #include "assets.h"
 #include "layout_map.h"
 #include "videopoker.h"
+#include "audio.h"
+#include "splash.h"
+#include "gameplay.h"
+#include "render.h"
 
-/* Sound slot used for card-placement SFX. */
-#define CARD_SOUND 0
-/* Tuned for a softer "card on poker desk" feel. */
-#define CARD_SFX_BASE_FREQ 10
-#define CARD_SFX_JITTER_MASK 0x03
-#define CARD_SFX_DURATION 1
+#if defined(CONFIG_VALIDATE) && CONFIG_VALIDATE
+#define ZP_VALIDATE 1
+#else
+#define ZP_VALIDATE 0
+#endif
+
 #define CARD_REVEAL_DELAY 4
-#define CARD_SFX_WAVEFORM WAV_SAWTOOTH
 #define CARD_TILESET_COLUMNS 41
 #define CARD_TILESET_ROWS 5
 #define CARD_TILESET_MAX_GID (CARD_TILESET_COLUMNS * CARD_TILESET_ROWS)
@@ -80,6 +83,11 @@ static uint8_t loaded_music_index = 0xFF;
  * 1 = card-SFX-only (gameplay track paused)
  */
 static uint8_t game_cards_sfx_mode = 0;
+/* Reusable static scratch buffers to avoid stack-heavy local arrays on SDCC. */
+static uint16_t scratch_gid_grid[SRC_CARD_H][SRC_CARD_W];
+static uint8_t draw_hand_cards_buf[CARD_COUNT];
+static uint8_t draw_hand_slots_buf[CARD_COUNT];
+static char hud_num_buf[6];
 
 /* Tracker storage (same pattern used in zeal-bricked). */
 static pattern_t music_pattern0;
@@ -166,46 +174,34 @@ static const uint16_t kSplashChipTL = 106; /* Tiled ID 105 */
 static const uint16_t kSplashChipTR = 107; /* Tiled ID 106 */
 static const uint16_t kSplashChipBL = 147; /* Tiled ID 146 */
 static const uint16_t kSplashChipBR = 148; /* Tiled ID 147 */
+/* Splash text content and placement. */
+static const char kSplashTitle[] = "ZEAL VIDEO POKER";
+static const char kSplashPrompt[] = "PRESS ENTER TO PLAY!";
+static const uint8_t kSplashTitleY = 10;
+static const uint8_t kSplashPromptY = 13;
 
 static void restart_if_credit_low(void);
 static void return_to_bet_phase(void);
 static void reseed_rng_for_new_hand(void);
 static void start_reveal_sequence(const uint8_t* slots, uint8_t len, uint8_t initial_mask);
 static void update_reveal_sequence(void);
-static void play_card_place_sound(void);
 static void set_win_banner_from_result(const HandResult* result);
 static void mark_all_slots_dirty(void);
 static void mark_slot_dirty(uint8_t slot);
 static void perform_bankrupt_reset_with_splash(void);
 static void clamp_bet_to_credits(void);
+#if ZP_VALIDATE
 static uint8_t validate_startup_tiles(void);
-static uint8_t init_card_component_tiles(void);
 static uint8_t verify_card_component_coverage(void);
+#endif
+static uint8_t init_card_component_tiles(void);
 static uint8_t ensure_map_gid_loaded(uint16_t gid);
-static void place_gid_grid_at(uint8_t x0, uint8_t y0, const uint16_t grid[SRC_CARD_H][SRC_CARD_W]);
 static void clear_overlay_layer1(void);
+static void draw_splash_prompt(uint8_t visible);
 static void draw_splash_chip_block(uint8_t x, uint8_t y, uint8_t chip_tl, uint8_t chip_tr, uint8_t chip_bl, uint8_t chip_br);
 static void draw_splash_border(void);
 static void render_splash_screen(void);
-static void run_splash_blocking(void);
-static void start_splash_music(void);
-static void start_game_music(void);
-static void tick_current_music(void);
-static void stop_current_music(void);
-static void apply_game_audio_mode(void);
 static void poll_keys(KeyEvents* ev);
-
-/* Card IDs are 0..51, grouped by suits in blocks of 13. */
-static uint8_t card_rank(uint8_t card)
-{
-    return card % 13;
-}
-
-/* Suit index: 0..3 from card ID. */
-static uint8_t card_suit(uint8_t card)
-{
-    return card / 13;
-}
 
 /* Translate TMX GID to the runtime tile ID loaded into VRAM. */
 static uint8_t map_gid_to_tile(uint16_t gid)
@@ -219,6 +215,7 @@ static uint8_t map_gid_to_tile(uint16_t gid)
     return FONT_SPACE_TILE;
 }
 
+#if ZP_VALIDATE
 static uint8_t is_gid_mapped(uint16_t gid)
 {
     for (uint8_t i = 0; i < mapped_count; i++) {
@@ -228,7 +225,9 @@ static uint8_t is_gid_mapped(uint16_t gid)
     }
     return 0;
 }
+#endif
 
+#if ZP_VALIDATE
 static uint8_t validate_gid_range(uint16_t gid, const char* name)
 {
     if (gid == 0 || gid > CARD_TILESET_MAX_GID) {
@@ -244,24 +243,38 @@ static uint8_t validate_startup_tiles(void)
      * Early guard against cards.gif/cards.tsx drift.
      * Validate only critical hardcoded GIDs used by font/back/hold paths.
      */
-    uint8_t ok = 1;
     uint16_t space_gid = kLayoutGids[(hold_y * LAYOUT_W) + LAYOUT_SPACE_SAMPLE_X];
 
-    ok &= validate_gid_range(kHoldFrameSourceGid, "hold_frame");
-    ok &= validate_gid_range(space_gid, "space_bg");
-    ok &= validate_gid_range(kColonGid, "font_colon");
-    ok &= validate_gid_range(kExclGid, "font_excl");
-    ok &= validate_gid_range((uint16_t)(kDigitGidBase + (FONT_DIGIT_COUNT - 1)), "font_digit_9");
-    ok &= validate_gid_range((uint16_t)(kAlphaAGidBase + (FONT_ALPHA_COUNT - 1)), "font_alpha_M");
-    ok &= validate_gid_range((uint16_t)(kAlphaNGidBase + (FONT_ALPHA_COUNT - 1)), "font_alpha_Z");
+    if (!validate_gid_range(kHoldFrameSourceGid, "hold_frame")) {
+        return 0;
+    }
+    if (!validate_gid_range(space_gid, "space_bg")) {
+        return 0;
+    }
+    if (!validate_gid_range(kColonGid, "font_colon")) {
+        return 0;
+    }
+    if (!validate_gid_range(kExclGid, "font_excl")) {
+        return 0;
+    }
+    if (!validate_gid_range((uint16_t)(kDigitGidBase + (FONT_DIGIT_COUNT - 1)), "font_digit_9")) {
+        return 0;
+    }
+    if (!validate_gid_range((uint16_t)(kAlphaAGidBase + (FONT_ALPHA_COUNT - 1)), "font_alpha_M")) {
+        return 0;
+    }
+    if (!validate_gid_range((uint16_t)(kAlphaNGidBase + (FONT_ALPHA_COUNT - 1)), "font_alpha_Z")) {
+        return 0;
+    }
 
     if (!is_gid_mapped(space_gid)) {
         printf("Tile self-check failed: space_bg GID %u missing from map remap\n", space_gid);
-        ok = 0;
+        return 0;
     }
 
-    return ok;
+    return 1;
 }
+#endif
 
 static uint8_t map_card_gid_to_tile(uint16_t gid)
 {
@@ -327,9 +340,11 @@ static uint8_t init_card_component_tiles(void)
         uint16_t gid = gids[i];
         uint8_t runtime_tile = (uint8_t)(CARD_SHARED_TILE_BASE + i);
 
+#if ZP_VALIDATE
         if (!validate_gid_range(gid, "card_component")) {
             return 0;
         }
+#endif
 
         if (load_source_tile(&vctx, gid, (uint16_t)runtime_tile * TILE_SIZE) != GFX_SUCCESS) {
             printf("Card tile init failed: load GID %u\n", gid);
@@ -342,15 +357,14 @@ static uint8_t init_card_component_tiles(void)
     return 1;
 }
 
+#if ZP_VALIDATE
 static uint8_t verify_card_component_coverage(void)
 {
-    uint16_t grid[SRC_CARD_H][SRC_CARD_W];
-
     for (uint8_t card = 0; card < DECK_SIZE; card++) {
-        assets_build_card_gid_grid(grid, card);
+        assets_build_card_gid_grid(scratch_gid_grid, card);
         for (uint8_t row = 0; row < SRC_CARD_H; row++) {
             for (uint8_t col = 0; col < SRC_CARD_W; col++) {
-                uint16_t gid = grid[row][col];
+                uint16_t gid = scratch_gid_grid[row][col];
                 if (gid == 0 || gid > CARD_TILESET_MAX_GID) {
                     printf("Card coverage check failed: card %u uses out-of-range GID %u\n", card, gid);
                     return 0;
@@ -363,10 +377,10 @@ static uint8_t verify_card_component_coverage(void)
         }
     }
 
-    assets_build_back_gid_grid(grid);
+    assets_build_back_gid_grid(scratch_gid_grid);
     for (uint8_t row = 0; row < SRC_CARD_H; row++) {
         for (uint8_t col = 0; col < SRC_CARD_W; col++) {
-            uint16_t gid = grid[row][col];
+            uint16_t gid = scratch_gid_grid[row][col];
             if (gid == 0 || gid > CARD_TILESET_MAX_GID) {
                 printf("Card coverage check failed: back grid uses out-of-range GID %u\n", gid);
                 return 0;
@@ -380,6 +394,7 @@ static uint8_t verify_card_component_coverage(void)
 
     return 1;
 }
+#endif
 
 static void load_ui_font_tiles(void)
 {
@@ -463,6 +478,21 @@ static void draw_splash_text_layer0(const char* text, uint8_t x, uint8_t y)
     }
 }
 
+static void draw_splash_prompt(uint8_t visible)
+{
+    uint8_t len = (uint8_t)strlen(kSplashPrompt);
+    uint8_t x = (uint8_t)((SCREEN_TILE_W - len) / 2);
+
+    if (visible) {
+        draw_splash_text_layer0(kSplashPrompt, x, kSplashPromptY);
+        return;
+    }
+
+    for (uint8_t i = 0; i < len; i++) {
+        gfx_tilemap_place(&vctx, splash_bg_tile, TILEMAP_LAYER, (uint8_t)(x + i), kSplashPromptY);
+    }
+}
+
 static void draw_splash_chip_block(uint8_t x, uint8_t y, uint8_t chip_tl, uint8_t chip_tr, uint8_t chip_bl, uint8_t chip_br)
 {
     gfx_tilemap_place(&vctx, chip_tl, TILEMAP_LAYER, x, y);
@@ -498,8 +528,6 @@ static void draw_splash_border(void)
 
 static void render_splash_screen(void)
 {
-    static const char title[] = "ZEAL VIDEO POKER";
-    static const char prompt[] = "PRESS ENTER TO PLAY!";
     static const uint8_t showcase_cards[5] = {
         9,  /* 10 of hearts */
         10, /* J of hearts */
@@ -511,8 +539,7 @@ static void render_splash_screen(void)
     static const uint8_t showcase_y = 18;
     uint16_t space_gid = kLayoutGids[(hold_y * LAYOUT_W) + LAYOUT_SPACE_SAMPLE_X];
     uint8_t bg_tile = map_gid_to_tile(space_gid);
-    uint8_t title_x = (uint8_t)((SCREEN_TILE_W - (uint8_t)strlen(title)) / 2);
-    uint8_t prompt_x = (uint8_t)((SCREEN_TILE_W - (uint8_t)strlen(prompt)) / 2);
+    uint8_t title_x = (uint8_t)((SCREEN_TILE_W - (uint8_t)strlen(kSplashTitle)) / 2);
     splash_bg_tile = bg_tile;
 
     clear_overlay_layer1();
@@ -523,240 +550,17 @@ static void render_splash_screen(void)
         }
     }
 
-    draw_splash_text_layer0(title, title_x, 10);
-    draw_splash_text_layer0(prompt, prompt_x, 13);
+    draw_splash_text_layer0(kSplashTitle, title_x, kSplashTitleY);
+    draw_splash_prompt(1);
 
     /* Showcase hand centered in splash screen. */
     for (uint8_t i = 0; i < 5; i++) {
-        uint16_t grid[SRC_CARD_H][SRC_CARD_W];
-        assets_build_card_gid_grid(grid, showcase_cards[i]);
-        place_gid_grid_at(showcase_x[i], showcase_y, grid);
+        assets_build_card_gid_grid(scratch_gid_grid, showcase_cards[i]);
+        place_gid_grid_at(showcase_x[i], showcase_y, scratch_gid_grid);
     }
 
     /* Draw border last so splash cards/text cannot overwrite chips. */
     draw_splash_border();
-}
-
-static void run_splash_blocking(void)
-{
-    /* Start from a clean input state so first press is always accepted. */
-    keyboard_flush();
-    controller_flush();
-
-    start_splash_music();
-
-    while (1) {
-        uint8_t buf[32];
-        uint16_t size = sizeof(buf);
-
-        sound_loop();
-        tick_current_music();
-        entropy++;
-
-        if (read(DEV_STDIN, buf, &size) == ERR_SUCCESS && size > 0) {
-            for (uint16_t i = 0; i < size; i++) {
-                uint8_t key = buf[i];
-                if (key == KB_KEY_ENTER || key == KB_KEY_SPACE) {
-                    goto splash_pressed;
-                }
-                if (key == KB_KEY_QUOTE || key == KB_RIGHT_SHIFT) {
-                    deinit();
-                    exit(0);
-                }
-            }
-        }
-
-        gfx_wait_vblank(&vctx);
-        gfx_wait_end_vblank(&vctx);
-    }
-
-splash_pressed:
-    stop_current_music();
-    msleep(40);
-    while (1) {
-        uint8_t buf[16];
-        uint16_t size = sizeof(buf);
-        uint8_t held = 0;
-
-        if (read(DEV_STDIN, buf, &size) == ERR_SUCCESS && size > 0) {
-            for (uint16_t i = 0; i < size; i++) {
-                if (buf[i] == KB_KEY_ENTER || buf[i] == KB_KEY_SPACE) {
-                    held = 1;
-                    break;
-                }
-            }
-        }
-        if (!held) {
-            break;
-        }
-        gfx_wait_vblank(&vctx);
-        gfx_wait_end_vblank(&vctx);
-    }
-
-    keyboard_flush();
-    controller_flush();
-}
-
-static void start_splash_music(void)
-{
-    if (!splash_music_ready) {
-        current_music_mode = 0;
-        return;
-    }
-    if (loaded_music_index != 0) {
-        if (load_zmt(&music_track, 0) == ERR_SUCCESS) {
-            loaded_music_index = 0;
-        } else {
-            current_music_mode = 0;
-            return;
-        }
-    }
-    zmt_sound_off();
-    zmt_track_reset(&music_track, 1);
-    current_music_mode = 1;
-}
-
-static void start_game_music(void)
-{
-    if (game_cards_sfx_mode) {
-        current_music_mode = 0;
-        return;
-    }
-    if (!game_music_ready) {
-        current_music_mode = 0;
-        return;
-    }
-    if (loaded_music_index != 1) {
-        if (load_zmt(&music_track, 1) == ERR_SUCCESS) {
-            loaded_music_index = 1;
-        } else {
-            current_music_mode = 0;
-            return;
-        }
-    }
-    zmt_sound_off();
-    zmt_track_reset(&music_track, 1);
-    current_music_mode = 2;
-}
-
-static void tick_current_music(void)
-{
-    if (current_music_mode == 1 && splash_music_ready) {
-        /* Splash track authored with arrangement flow. */
-        zmt_tick(&music_track, 1);
-    } else if (current_music_mode == 2 && game_music_ready) {
-        /* Gameplay track uses arrangement flow (zmt_tick(..., 1)). */
-        zmt_tick(&music_track, 1);
-    }
-}
-
-static void stop_current_music(void)
-{
-    zmt_sound_off();
-    current_music_mode = 0;
-}
-
-static void apply_game_audio_mode(void)
-{
-    if (game_cards_sfx_mode) {
-        /* Card-SFX-only mode: silence gameplay music. */
-        if (current_music_mode == 2) {
-            stop_current_music();
-        }
-        /*
-         * After tracker shutdown, restore sound/tracker runtime state so
-         * plain sound_play() effects remain audible in SFX-only mode.
-         */
-        zmt_reset(VOL_50);
-    } else {
-        /* Music-only mode: ensure gameplay track is active outside splash. */
-        if (state != STATE_BET || !pending_bankrupt_reset) {
-            start_game_music();
-        }
-    }
-}
-
-/* Restore one map cell from original TMX layout (used to erase overlays). */
-static void restore_map_cell(uint8_t x, uint8_t y)
-{
-    uint16_t gid = kLayoutGids[(y * LAYOUT_W) + x];
-    gfx_tilemap_place(&vctx, map_gid_to_tile(gid), TILEMAP_LAYER, x, y);
-}
-
-static void draw_hold_frames(void)
-{
-    /* Draw/remove a 1-tile border around each card slot based on hold flag. */
-    for (uint8_t i = 0; i < CARD_COUNT; i++) {
-        uint8_t show_frame = (state == STATE_HOLD) && cards[i].held;
-        uint8_t x0 = (uint8_t)(slot_x[i] - 1);
-        uint8_t y0 = (uint8_t)(slot_y - 1);
-        uint8_t x1 = (uint8_t)(slot_x[i] + SRC_CARD_W);
-        uint8_t y1 = (uint8_t)(slot_y + SRC_CARD_H);
-
-        for (uint8_t x = x0; x <= x1; x++) {
-            if (show_frame) {
-                gfx_tilemap_place(&vctx, HOLD_FRAME_TILE, TILEMAP_LAYER, x, y0);
-                gfx_tilemap_place(&vctx, HOLD_FRAME_TILE, TILEMAP_LAYER, x, y1);
-            } else {
-                restore_map_cell(x, y0);
-                restore_map_cell(x, y1);
-            }
-        }
-
-        for (uint8_t y = (uint8_t)(y0 + 1); y < y1; y++) {
-            if (show_frame) {
-                gfx_tilemap_place(&vctx, HOLD_FRAME_TILE, TILEMAP_LAYER, x0, y);
-                gfx_tilemap_place(&vctx, HOLD_FRAME_TILE, TILEMAP_LAYER, x1, y);
-            } else {
-                restore_map_cell(x0, y);
-                restore_map_cell(x1, y);
-            }
-        }
-    }
-}
-
-static void init_layout_tiles(void)
-{
-    /* Load each unique GID from the TMX map exactly once into VRAM tile slots. */
-    mapped_count = 0;
-
-    for (uint16_t i = 0; i < (LAYOUT_W * LAYOUT_H); i++) {
-        uint16_t gid = kLayoutGids[i];
-        uint8_t found = 0;
-
-        for (uint8_t j = 0; j < mapped_count; j++) {
-            if (mapped_gids[j] == gid) {
-                found = 1;
-                break;
-            }
-        }
-
-        if (found) {
-            continue;
-        }
-
-        if (mapped_count >= MAP_TILE_CAPACITY) {
-            break;
-        }
-
-        mapped_gids[mapped_count] = gid;
-        mapped_tiles[mapped_count] = (uint8_t)(MAP_TILE_BASE + mapped_count);
-
-        load_source_tile(&vctx, gid, (uint16_t)mapped_tiles[mapped_count] * TILE_SIZE);
-        mapped_count++;
-    }
-}
-
-static void render_layout(void)
-{
-    /* Paint the full static background UI from TMX-derived GID data. */
-    for (uint8_t y = 0; y < LAYOUT_H; y++) {
-        for (uint8_t x = 0; x < LAYOUT_W; x++) {
-            uint16_t gid = kLayoutGids[(y * LAYOUT_W) + x];
-            uint8_t tile = map_gid_to_tile(gid);
-            gfx_tilemap_place(&vctx, tile, TILEMAP_LAYER, x, y);
-        }
-    }
 }
 
 static void mark_all_slots_dirty(void)
@@ -773,265 +577,6 @@ static void mark_slot_dirty(uint8_t slot)
     if (slot < CARD_COUNT) {
         dirty_slots[slot] = 1;
     }
-}
-
-static void place_gid_grid_at(uint8_t x0, uint8_t y0, const uint16_t grid[SRC_CARD_H][SRC_CARD_W])
-{
-    for (uint8_t row = 0; row < SRC_CARD_H; row++) {
-        for (uint8_t col = 0; col < SRC_CARD_W; col++) {
-            uint16_t gid = grid[row][col];
-            uint8_t tile = map_card_gid_to_tile(gid);
-            gfx_tilemap_place(&vctx, tile, TILEMAP_LAYER, (uint8_t)(x0 + col), (uint8_t)(y0 + row));
-        }
-    }
-}
-
-static void draw_card_slot_direct(uint8_t slot, uint8_t show_face, uint8_t card)
-{
-    uint16_t grid[SRC_CARD_H][SRC_CARD_W];
-    if (show_face) {
-        assets_build_card_gid_grid(grid, card);
-    } else {
-        assets_build_back_gid_grid(grid);
-    }
-    place_gid_grid_at(slot_x[slot], slot_y, grid);
-}
-
-static void clear_card_slot(uint8_t slot)
-{
-    uint8_t x0 = slot_x[slot];
-    for (uint8_t row = 0; row < SRC_CARD_H; row++) {
-        for (uint8_t col = 0; col < SRC_CARD_W; col++) {
-            restore_map_cell((uint8_t)(x0 + col), (uint8_t)(slot_y + row));
-        }
-    }
-}
-
-static void clear_bottom_row(void)
-{
-    /* Clears the action banner/hold row on tilemap layer 0. */
-    for (uint8_t x = 2; x < 38; x++) {
-        restore_map_cell(x, hold_y);
-    }
-}
-
-static void clear_hud_field(uint8_t x, uint8_t y, uint8_t width)
-{
-    /* Clears one numeric HUD field before printing a new value. */
-    for (uint8_t i = 0; i < width; i++) {
-        restore_map_cell((uint8_t)(x + i), y);
-    }
-}
-
-static void draw_hold_labels(void)
-{
-    static const char hold_text[] = "HOLD";
-    static const char deal_text[] = "DEAL";
-    static const char draw_text[] = "DRAW";
-    static const char clear_row[] = "                                    ";
-    uint8_t any_held = 0;
-
-    clear_bottom_row();
-    /* nprint_string draws on layer 1, so clear that row explicitly too. */
-    nprint_string(&vctx, clear_row, 36, 2, hold_y);
-
-    /*
-     * Banner policy:
-     * - BET phase: show DEAL
-     * - HOLD phase: show DRAW until at least one hold is set, then show HOLD labels
-     * - RESULT phase: show YOU HAVE WON! only for winning hands
-     */
-    if (state != STATE_HOLD) {
-        if (show_win_banner) {
-            uint8_t msg_len = (uint8_t)strlen(win_banner_text);
-            uint8_t msg_x = (uint8_t)(2 + ((36 - msg_len) / 2));
-            nprint_string(&vctx, win_banner_text, msg_len, msg_x, hold_y);
-        } else if (state == STATE_BET || state == STATE_RESULT) {
-            nprint_string(&vctx, deal_text, 4, 18, hold_y);
-        }
-        return;
-    }
-    for (uint8_t i = 0; i < CARD_COUNT; i++) {
-        if (cards[i].held) {
-            any_held = 1;
-            break;
-        }
-    }
-    if (!any_held) {
-        nprint_string(&vctx, draw_text, 4, 18, hold_y);
-    }
-
-    for (uint8_t i = 0; i < CARD_COUNT; i++) {
-        if (cards[i].held) {
-            nprint_string(&vctx, hold_text, 4, hold_x[i], hold_y);
-        }
-    }
-}
-
-static uint8_t is_straight(const uint8_t ranks[13])
-{
-    /*
-     * ranks[0] is Ace.
-     * Supports:
-     * - normal 5-card runs
-     * - A-2-3-4-5
-     * - 10-J-Q-K-A
-     */
-    uint8_t run = 0;
-
-    for (uint8_t r = 0; r < 13; r++) {
-        if (ranks[r]) {
-            run++;
-            if (run == 5) {
-                return true;
-            }
-        } else {
-            run = 0;
-        }
-    }
-
-    if (ranks[0] && ranks[1] && ranks[2] && ranks[3] && ranks[4]) {
-        return true;
-    }
-
-    if (ranks[0] && ranks[9] && ranks[10] && ranks[11] && ranks[12]) {
-        return true;
-    }
-
-    return false;
-}
-
-static uint8_t is_royal(const uint8_t ranks[13])
-{
-    /* Royal uses 10/J/Q/K/A ranks; suit is checked separately by flush logic. */
-    return ranks[0] && ranks[9] && ranks[10] && ranks[11] && ranks[12];
-}
-
-static void shuffle_deck(void)
-{
-    /* Fisher-Yates shuffle over full 52-card deck. */
-    for (uint8_t i = 0; i < DECK_SIZE; i++) {
-        deck[i] = i;
-    }
-
-    for (uint8_t i = DECK_SIZE - 1; i > 0; i--) {
-        uint8_t j = rand8_quick() % (i + 1);
-        uint8_t tmp = deck[i];
-        deck[i] = deck[j];
-        deck[j] = tmp;
-    }
-
-    deck_pos = 0;
-}
-
-static uint8_t pop_deck(void)
-{
-    /* Safety fallback if deck is exhausted unexpectedly. */
-    if (deck_pos >= DECK_SIZE) {
-        shuffle_deck();
-    }
-    return deck[deck_pos++];
-}
-
-static void draw_hud_values(void)
-{
-    char bet_buf[6];
-    char win_buf[6];
-    char credit_buf[6];
-    /* Always print fixed-width 3 digits so HUD text does not jitter. */
-    sprintf(bet_buf, "%03u", bet);
-    sprintf(win_buf, "%03u", win_amount);
-    sprintf(credit_buf, "%03u", credits);
-
-    clear_hud_field(bet_x, bet_y, 4);
-    clear_hud_field(win_x, win_y, 4);
-    clear_hud_field(credit_x, credit_y, 4);
-    restore_map_cell((uint8_t)(credit_x - 1), credit_y);
-
-    nprint_string(&vctx, bet_buf, 3, bet_x, bet_y);
-    nprint_string(&vctx, win_buf, 3, win_x, win_y);
-    nprint_string(&vctx, credit_buf, 3, credit_x, credit_y);
-}
-
-HandResult evaluate_hand(const uint8_t hand[CARD_COUNT])
-{
-    uint8_t rank_counts[13] = {0};
-    uint8_t suit_counts[4] = {0};
-
-    uint8_t pairs = 0;
-    uint8_t trips = 0;
-    uint8_t quads = 0;
-
-    /* Histogram ranks/suits once, then derive all categories from counts. */
-    for (uint8_t i = 0; i < CARD_COUNT; i++) {
-        rank_counts[card_rank(hand[i])]++;
-        suit_counts[card_suit(hand[i])]++;
-    }
-
-    uint8_t flush = false;
-    for (uint8_t s = 0; s < 4; s++) {
-        if (suit_counts[s] == 5) {
-            flush = true;
-            break;
-        }
-    }
-
-    uint8_t straight = is_straight(rank_counts);
-
-    for (uint8_t r = 0; r < 13; r++) {
-        if (rank_counts[r] == 2) {
-            pairs++;
-        } else if (rank_counts[r] == 3) {
-            trips++;
-        } else if (rank_counts[r] == 4) {
-            quads++;
-        }
-    }
-
-    /*
-     * Ranking priority follows the pay table from highest to lowest.
-     * First match returns immediately.
-     */
-    if (straight && flush && is_royal(rank_counts)) {
-        HandResult result = {250, "ROYAL"};
-        return result;
-    }
-    if (straight && flush) {
-        HandResult result = {50, "STRFL"};
-        return result;
-    }
-    if (quads) {
-        HandResult result = {25, "4KIND"};
-        return result;
-    }
-    if (trips && pairs) {
-        HandResult result = {9, "FULLHS"};
-        return result;
-    }
-    if (flush) {
-        HandResult result = {6, "FLUSH"};
-        return result;
-    }
-    if (straight) {
-        HandResult result = {4, "STRAIT"};
-        return result;
-    }
-    if (trips) {
-        HandResult result = {3, "3KIND"};
-        return result;
-    }
-    if (pairs == 2) {
-        HandResult result = {2, "2PAIR"};
-        return result;
-    }
-
-    if (pairs == 1) {
-        HandResult result = {1, "PAIR"};
-        return result;
-    }
-
-    HandResult result = {0, "NOWIN"};
-    return result;
 }
 
 static void set_win_banner_from_result(const HandResult* result)
@@ -1058,45 +603,6 @@ static void set_win_banner_from_result(const HandResult* result)
     }
 }
 
-void render_table(void)
-{
-    /* Static background render (called once at init). */
-    render_layout();
-}
-
-void render_cards(void)
-{
-    /*
-     * Draw only changed slots:
-     * - avoids unnecessary tilemap writes
-     * - card visuals are composed directly from shared runtime tiles
-     */
-    for (uint8_t i = 0; i < CARD_COUNT; i++) {
-        if (!full_redraw && !dirty_slots[i]) {
-            continue;
-        }
-
-        if (reveal_mask & (uint8_t)(1U << i)) {
-            draw_card_slot_direct(i, show_card_faces, cards[i].card);
-            /* Play card SFX exactly when the card is visually placed (sync fix). */
-            if (reveal_sfx_pending_mask & (uint8_t)(1U << i)) {
-                play_card_place_sound();
-                reveal_sfx_pending_mask &= (uint8_t)~(1U << i);
-            }
-        } else {
-            clear_card_slot(i);
-        }
-
-        dirty_slots[i] = 0;
-    }
-    full_redraw = 0;
-
-    /* Dynamic overlays are redrawn every time cards/HUD state changes. */
-    draw_hold_frames();
-    draw_hold_labels();
-    draw_hud_values();
-}
-
 void deal_hand(void)
 {
     /* Deal five fresh cards and move to hold selection phase. */
@@ -1115,8 +621,6 @@ void deal_hand(void)
 void draw_hand(void)
 {
     HandResult result;
-    uint8_t hand[CARD_COUNT];
-    uint8_t slots[CARD_COUNT];
     uint8_t slot_count = 0;
     uint8_t keep_mask = 0;
 
@@ -1124,16 +628,16 @@ void draw_hand(void)
     for (uint8_t i = 0; i < CARD_COUNT; i++) {
         if (!cards[i].held) {
             cards[i].card = pop_deck();
-            slots[slot_count++] = i;
+            draw_hand_slots_buf[slot_count++] = i;
             mark_slot_dirty(i);
         } else {
             keep_mask |= (uint8_t)(1U << i);
         }
-        hand[i] = cards[i].card;
+        draw_hand_cards_buf[i] = cards[i].card;
     }
 
     /* Score result and credit winnings (multiplier * current bet). */
-    result = evaluate_hand(hand);
+    result = evaluate_hand(draw_hand_cards_buf);
     win_amount = (uint16_t)result.multiplier * bet;
     credits += win_amount;
     for (uint8_t i = 0; i < CARD_COUNT; i++) {
@@ -1149,7 +653,7 @@ void draw_hand(void)
         set_win_banner_from_result(&result);
     }
     state = STATE_RESULT;
-    start_reveal_sequence(slots, slot_count, keep_mask);
+    start_reveal_sequence(draw_hand_slots_buf, slot_count, keep_mask);
     suppress_enter_ticks = 8;
     needs_redraw = 1;
     restart_if_credit_low();
@@ -1266,24 +770,6 @@ static void update_reveal_sequence(void)
     }
 }
 
-static void play_card_place_sound(void)
-{
-    if (!game_cards_sfx_mode) {
-        return;
-    }
-
-    uint8_t jitter = (uint8_t)(rand8_quick() & CARD_SFX_JITTER_MASK);
-    Sound* tap = sound_get(CARD_SOUND);
-    if (tap != NULL) {
-        tap->waveform = CARD_SFX_WAVEFORM;
-    }
-
-    tap = sound_play(CARD_SOUND, (uint16_t)(CARD_SFX_BASE_FREQ + jitter), CARD_SFX_DURATION);
-    if (tap != NULL) {
-        tap->waveform = CARD_SFX_WAVEFORM;
-    }
-}
-
 static void restart_if_credit_low(void)
 {
     /* Defer game-over reset to update() to avoid state/input side effects in draw_hand(). */
@@ -1318,7 +804,7 @@ static void clamp_bet_to_credits(void)
 static void perform_bankrupt_reset_with_splash(void)
 {
     render_splash_screen();
-    run_splash_blocking();
+    splash_run_blocking(draw_splash_prompt);
     render_table();
     start_game_music();
 
@@ -1460,9 +946,70 @@ void init(void)
         }
     }
 
-    Sound* card_sound = sound_get(CARD_SOUND);
-    if (card_sound != NULL) {
-        card_sound->waveform = CARD_SFX_WAVEFORM;
+    {
+        AudioBindings audio_bindings = {
+            .splash_music_ready = &splash_music_ready,
+            .game_music_ready = &game_music_ready,
+            .current_music_mode = &current_music_mode,
+            .loaded_music_index = &loaded_music_index,
+            .game_cards_sfx_mode = &game_cards_sfx_mode,
+            .entropy = &entropy,
+            .state = &state,
+            .pending_bankrupt_reset = &pending_bankrupt_reset,
+            .music_track = &music_track,
+        };
+        audio_bind(&audio_bindings);
+    }
+    {
+        GameplayBindings gameplay_bindings = {
+            .deck = deck,
+            .deck_pos = &deck_pos,
+        };
+        gameplay_bind(&gameplay_bindings);
+    }
+    {
+        RenderBindings render_bindings = {
+            .vctx = &vctx,
+            .cards = cards,
+            .state = &state,
+            .credits = &credits,
+            .bet = &bet,
+            .win_amount = &win_amount,
+            .show_win_banner = &show_win_banner,
+            .show_card_faces = &show_card_faces,
+            .dirty_slots = dirty_slots,
+            .full_redraw = &full_redraw,
+            .reveal_mask = &reveal_mask,
+            .reveal_sfx_pending_mask = &reveal_sfx_pending_mask,
+            .win_banner_text = win_banner_text,
+            .hud_num_buf = hud_num_buf,
+            .scratch_gid_grid = scratch_gid_grid,
+            .mapped_gids = mapped_gids,
+            .mapped_tiles = mapped_tiles,
+            .mapped_count = &mapped_count,
+            .card_gid_to_runtime = card_gid_to_runtime,
+            .slot_x = slot_x,
+            .slot_y = &slot_y,
+            .hold_x = hold_x,
+            .hold_y = &hold_y,
+            .bet_x = &bet_x,
+            .bet_y = &bet_y,
+            .win_x = &win_x,
+            .win_y = &win_y,
+            .credit_x = &credit_x,
+            .credit_y = &credit_y,
+            .map_gid_to_tile_fn = map_gid_to_tile,
+            .map_card_gid_to_tile_fn = map_card_gid_to_tile,
+        };
+        render_bind(&render_bindings);
+    }
+    {
+        SplashBindings splash_bindings = {
+            .vctx = &vctx,
+            .entropy = &entropy,
+            .quit_cb = deinit,
+        };
+        splash_bind(&splash_bindings);
     }
 
     init_layout_tiles();
@@ -1473,6 +1020,7 @@ void init(void)
         printf("Failed to initialize splash border tiles.\n");
         exit(1);
     }
+#if ZP_VALIDATE
     if (!validate_startup_tiles()) {
         printf("Critical tile validation failed. Check cards.gif/cards.tsx/cards.tmx.\n");
         exit(1);
@@ -1481,18 +1029,21 @@ void init(void)
         printf("Card composition tile validation failed. Check cards.gif tile mappings.\n");
         exit(1);
     }
+#endif
     if (!init_card_component_tiles()) {
         printf("Card component tile preload failed.\n");
         exit(1);
     }
+#if ZP_VALIDATE
     if (!verify_card_component_coverage()) {
         printf("Card component coverage check failed.\n");
         exit(1);
     }
+#endif
     load_ui_font_tiles();
     render_splash_screen();
     gfx_enable_screen(1);
-    run_splash_blocking();
+    splash_run_blocking(draw_splash_prompt);
     start_game_music();
 
     render_table();

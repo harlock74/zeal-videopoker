@@ -5,11 +5,17 @@ include($ENV{ZOS_PATH}/cmake/zos_init.cmake)
 set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
 
 project(zpoker C ASM)
+option(CONFIG_VALIDATE "Enable startup validation checks" OFF)
 
 add_executable(zpoker
     src/videopoker.c
+    src/audio.c
+    src/splash.c
+    src/gameplay.c
+    src/render.c
     src/assets.c
 )
+target_compile_definitions(zpoker PRIVATE CONFIG_VALIDATE=$<BOOL:${CONFIG_VALIDATE}>)
 
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
