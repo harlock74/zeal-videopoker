@@ -12,6 +12,9 @@
 #include "splash.h"
 
 static SplashBindings g_splash = {0};
+/* Static input buffers reduce stack usage in splash loop on SDCC. */
+static uint8_t g_splash_read_buf[32];
+static uint8_t g_splash_release_buf[16];
 
 void splash_bind(const SplashBindings* bindings)
 {
@@ -25,8 +28,6 @@ void splash_run_blocking(void (*draw_prompt)(uint8_t visible))
 {
     uint8_t blink_counter = 0;
     uint8_t prompt_visible = 1;
-    uint8_t splash_read_buf[32];
-    uint8_t splash_release_buf[16];
 
     /* Start from a clean input state so first press is always accepted. */
     keyboard_flush();
@@ -35,15 +36,15 @@ void splash_run_blocking(void (*draw_prompt)(uint8_t visible))
     start_splash_music();
 
     while (1) {
-        uint16_t size = sizeof(splash_read_buf);
+        uint16_t size = sizeof(g_splash_read_buf);
 
         sound_loop();
         tick_current_music();
         (*g_splash.entropy)++;
 
-        if (read(DEV_STDIN, splash_read_buf, &size) == ERR_SUCCESS && size > 0) {
+        if (read(DEV_STDIN, g_splash_read_buf, &size) == ERR_SUCCESS && size > 0) {
             for (uint16_t i = 0; i < size; i++) {
-                uint8_t key = splash_read_buf[i];
+                uint8_t key = g_splash_read_buf[i];
                 if (key == KB_KEY_ENTER || key == KB_KEY_SPACE) {
                     goto splash_pressed;
                 }
@@ -69,12 +70,12 @@ splash_pressed:
     stop_current_music();
     msleep(40);
     while (1) {
-        uint16_t size = sizeof(splash_release_buf);
+        uint16_t size = sizeof(g_splash_release_buf);
         uint8_t held = 0;
 
-        if (read(DEV_STDIN, splash_release_buf, &size) == ERR_SUCCESS && size > 0) {
+        if (read(DEV_STDIN, g_splash_release_buf, &size) == ERR_SUCCESS && size > 0) {
             for (uint16_t i = 0; i < size; i++) {
-                if (splash_release_buf[i] == KB_KEY_ENTER || splash_release_buf[i] == KB_KEY_SPACE) {
+                if (g_splash_release_buf[i] == KB_KEY_ENTER || g_splash_release_buf[i] == KB_KEY_SPACE) {
                     held = 1;
                     break;
                 }

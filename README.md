@@ -25,14 +25,16 @@ Video Poker for Zeal 8-bit Computer.
    - Press `ENTER` or `SPACE` to continue.
    - Card backs are shown again, ready for next hand.
 
-If credits reach `0`, the game returns to the splash screen, waits for `ENTER/SPACE`,
-then resets bankroll and re-enters the bet phase.
+If credits reach `0`, the bottom banner shows:
+`CREDIT OVER! PRESS ENTER TO START!`
+After `ENTER/SPACE`, the game returns to the splash screen, then resets bankroll
+and re-enters the bet phase.
 
 ## Controls
 
 - `UP` / `DOWN`: increase/decrease bet (bet phase)
 - `A` / `S` / `D` / `F` / `G`: hold/unhold cards 1..5 (hold phase)
-- `ENTER` or `SPACE`: deal, draw, continue
+- `ENTER` or `SPACE`: deal, draw, continue after winning a poker hand
 - `P`: toggle gameplay audio mode
   - `music-only` (default): gameplay tracker music on, card placement SFX muted
   - `card-SFX-only`: gameplay tracker music paused, card placement SFX enabled
@@ -172,6 +174,7 @@ Current hardware-tuned defaults:
 ## Splash Screen Notes
 
 - Splash is blocking (`ENTER/SPACE` to continue).
+- `PRESS ENTER TO PLAY!` now blinks while waiting for input.
 - Border chips use dedicated splash GIDs and are drawn last to avoid overwrite artifacts.
 - On game-over (`credits == 0`), splash is shown again before bankroll reset.
 - Splash loop no longer redraws the static border every frame, improving effective

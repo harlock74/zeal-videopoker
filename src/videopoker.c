@@ -88,6 +88,8 @@ static uint16_t scratch_gid_grid[SRC_CARD_H][SRC_CARD_W];
 static uint8_t draw_hand_cards_buf[CARD_COUNT];
 static uint8_t draw_hand_slots_buf[CARD_COUNT];
 static char hud_num_buf[6];
+/* Shared card-component GID scratch list for init preload path. */
+static uint16_t component_gids_buf[CARD_SHARED_TILE_CAPACITY];
 
 /* Tracker storage (same pattern used in zeal-bricked). */
 static pattern_t music_pattern0;
@@ -320,8 +322,7 @@ static uint8_t ensure_map_gid_loaded(uint16_t gid)
 
 static uint8_t init_card_component_tiles(void)
 {
-    uint16_t gids[CARD_SHARED_TILE_CAPACITY];
-    uint8_t count = assets_collect_component_gids(gids, CARD_SHARED_TILE_CAPACITY);
+    uint8_t count = assets_collect_component_gids(component_gids_buf, CARD_SHARED_TILE_CAPACITY);
 
     memset(card_gid_to_runtime, 0, sizeof(card_gid_to_runtime));
     memset(card_gid_missing_warned, 0, sizeof(card_gid_missing_warned));
@@ -337,7 +338,7 @@ static uint8_t init_card_component_tiles(void)
     }
 
     for (uint8_t i = 0; i < count; i++) {
-        uint16_t gid = gids[i];
+        uint16_t gid = component_gids_buf[i];
         uint8_t runtime_tile = (uint8_t)(CARD_SHARED_TILE_BASE + i);
 
 #if ZP_VALIDATE
@@ -772,10 +773,17 @@ static void update_reveal_sequence(void)
 
 static void restart_if_credit_low(void)
 {
-    /* Defer game-over reset to update() to avoid state/input side effects in draw_hand(). */
+    /*
+     * Credit exhausted: show explicit banner and wait for Enter/Space before
+     * returning to splash. Keep the current hand visible meanwhile.
+     */
     if (credits > 0) {
         return;
     }
+
+    strcpy(win_banner_text, "CREDIT OVER! PRESS ENTER TO START!");
+    show_win_banner = 1;
+    needs_hud_redraw = 1;
     pending_bankrupt_reset = 1;
 }
 
@@ -1094,7 +1102,14 @@ void update(void)
     }
 
     if (pending_bankrupt_reset) {
-        perform_bankrupt_reset_with_splash();
+        /*
+         * Game-over confirmation gate:
+         * only Enter/Space moves back to splash screen and restarts bankroll.
+         */
+        if ((ev.enter || ev.space) && suppress_enter_ticks == 0 && confirm_armed) {
+            confirm_armed = 0;
+            perform_bankrupt_reset_with_splash();
+        }
         return;
     }
 
@@ -1124,7 +1139,7 @@ void update(void)
     if (state == STATE_RESULT) {
         /* RESULT waits for confirmation before returning to BET phase. */
         if (suppress_enter_ticks == 0) {
-            if (show_win_banner && (ev.up || ev.down || ev.enter || ev.space)) {
+            if (!pending_bankrupt_reset && show_win_banner && (ev.up || ev.down || ev.enter || ev.space)) {
                 show_win_banner = 0;
                 needs_hud_redraw = 1;
             }

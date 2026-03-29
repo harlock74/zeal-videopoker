@@ -1,4 +1,5 @@
 #include <stdint.h>
+#include <string.h>
 
 #include <zgdk.h>
 
@@ -7,6 +8,9 @@
 
 static uint8_t* g_deck = NULL;
 static uint8_t* g_deck_pos = NULL;
+/* Reusable evaluation histograms (avoids repeated stack arrays on SDCC). */
+static uint8_t g_rank_counts[13];
+static uint8_t g_suit_counts[4];
 
 void gameplay_bind(const GameplayBindings* bindings)
 {
@@ -93,35 +97,35 @@ uint8_t pop_deck(void)
 
 HandResult evaluate_hand(const uint8_t hand[CARD_COUNT])
 {
-    uint8_t rank_counts[13] = {0};
-    uint8_t suit_counts[4] = {0};
-
     uint8_t pairs = 0;
     uint8_t trips = 0;
     uint8_t quads = 0;
 
+    memset(g_rank_counts, 0, sizeof(g_rank_counts));
+    memset(g_suit_counts, 0, sizeof(g_suit_counts));
+
     /* Histogram ranks/suits once, then derive all categories from counts. */
     for (uint8_t i = 0; i < CARD_COUNT; i++) {
-        rank_counts[card_rank(hand[i])]++;
-        suit_counts[card_suit(hand[i])]++;
+        g_rank_counts[card_rank(hand[i])]++;
+        g_suit_counts[card_suit(hand[i])]++;
     }
 
     uint8_t flush = false;
     for (uint8_t s = 0; s < 4; s++) {
-        if (suit_counts[s] == 5) {
+        if (g_suit_counts[s] == 5) {
             flush = true;
             break;
         }
     }
 
-    uint8_t straight = is_straight(rank_counts);
+    uint8_t straight = is_straight(g_rank_counts);
 
     for (uint8_t r = 0; r < 13; r++) {
-        if (rank_counts[r] == 2) {
+        if (g_rank_counts[r] == 2) {
             pairs++;
-        } else if (rank_counts[r] == 3) {
+        } else if (g_rank_counts[r] == 3) {
             trips++;
-        } else if (rank_counts[r] == 4) {
+        } else if (g_rank_counts[r] == 4) {
             quads++;
         }
     }
@@ -130,7 +134,7 @@ HandResult evaluate_hand(const uint8_t hand[CARD_COUNT])
      * Ranking priority follows the pay table from highest to lowest.
      * First match returns immediately.
      */
-    if (straight && flush && is_royal(rank_counts)) {
+    if (straight && flush && is_royal(g_rank_counts)) {
         HandResult result = {250, "ROYAL"};
         return result;
     }
