@@ -33,6 +33,9 @@ then resets bankroll and re-enters the bet phase.
 - `UP` / `DOWN`: increase/decrease bet (bet phase)
 - `A` / `S` / `D` / `F` / `G`: hold/unhold cards 1..5 (hold phase)
 - `ENTER` or `SPACE`: deal, draw, continue
+- `P`: toggle gameplay audio mode
+  - `music-only` (default): gameplay tracker music on, card placement SFX muted
+  - `card-SFX-only`: gameplay tracker music paused, card placement SFX enabled
 - `'`: quit
 
 ## Hand Ranking and Payout
@@ -90,17 +93,34 @@ Supporting files:
 
 ## Audio Implementation
 
-The game uses ZGDK/ZVB sound APIs and plays a short SFX every time a card is
-placed (both card backs and face cards) during reveal animations.
+The game uses two audio paths:
+
+1. **Tracker music (`.zmt`)**
+   - Splash screen track: `assets/splash.zmt`
+   - Gameplay track: `assets/music.zmt`
+   - Loaded from ROM via `load_zmt(...)` in `src/assets.c`
+   - Played by `zmt_tick(&music_track, 1)` in the frame loop
+
+2. **Card placement SFX**
+   - Triggered per revealed card by `play_card_place_sound()`
+   - Uses `sound_play(...)` with hardware-tuned pitch jitter
 
 Audio lifecycle in code:
 
 - `sound_init()` in `init()`
 - `sound_loop()` once per frame in `update()`
-- `sound_play(...)` in `play_card_place_sound()`
+- `tick_current_music()` once per frame in `update()`
+- `sound_play(...)` in `play_card_place_sound()` (when SFX mode is active)
 - `sound_stop_all()` + `sound_deinit()` in `deinit()`
 
-Audio sync fix:
+Audio mode switch during gameplay:
+
+- `P` toggles `game_cards_sfx_mode`
+- `apply_game_audio_mode()` enforces:
+  - music-only mode -> `start_game_music()`
+  - card-SFX-only mode -> `stop_current_music()` and `zmt_reset(VOL_50)` for clean SFX playback
+
+Card reveal sync fix:
 
 - Reveal logic marks a per-slot pending SFX flag.
 - The SFX is triggered in `render_cards()` exactly when the corresponding slot is actually placed.
@@ -124,6 +144,8 @@ Current hardware-tuned defaults:
 2. **Per-slot dirty rendering**
    - `dirty_slots[]` + `full_redraw` allow incremental card redraw.
    - Only changed slots are processed during reveal/deal/draw transitions.
+   - Redundant extra `mark_all_slots_dirty()` calls were removed where
+     `start_reveal_sequence()` already performs full slot invalidation.
 
 3. **Persistent asset stream reuse (`assets.c`)**
    - `cards.zts` stream is reused and cursor-tracked.
@@ -152,6 +174,8 @@ Current hardware-tuned defaults:
 - Splash is blocking (`ENTER/SPACE` to continue).
 - Border chips use dedicated splash GIDs and are drawn last to avoid overwrite artifacts.
 - On game-over (`credits == 0`), splash is shown again before bankroll reset.
+- Splash loop no longer redraws the static border every frame, improving effective
+  per-frame timing for splash music playback.
 - Layer1 (text overlay) is explicitly cleared at init and at splash render time.
 - Space character mapping for `nprint_string()` uses an empty overlay tile, so text clears do not leave blue bars/garbage tiles.
 - Previous per-field splash text clear helper was removed as redundant after full Layer1 clear.

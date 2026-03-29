@@ -11,6 +11,7 @@
 #include <zvb_gfx.h>
 #include <zvb_sound.h>
 #include <zgdk.h>
+#include <zgdk/sound/tracker.h>
 
 #include "assets.h"
 #include "layout_map.h"
@@ -69,6 +70,39 @@ static uint8_t reveal_active = 0;
 static uint8_t reveal_sfx_pending_mask = 0;
 /* Deferred game-over transition to splash/reset, executed safely in update(). */
 static uint8_t pending_bankrupt_reset = 0;
+/* Music availability flags and current playback mode. */
+static uint8_t splash_music_ready = 0;
+static uint8_t game_music_ready = 0;
+static uint8_t current_music_mode = 0; /* 0=off, 1=splash, 2=game */
+static uint8_t loaded_music_index = 0xFF;
+/* Gameplay audio mode toggle (P):
+ * 0 = music-only (card SFX muted)
+ * 1 = card-SFX-only (gameplay track paused)
+ */
+static uint8_t game_cards_sfx_mode = 0;
+
+/* Tracker storage (same pattern used in zeal-bricked). */
+static pattern_t music_pattern0;
+static pattern_t music_pattern1;
+static pattern_t music_pattern2;
+static pattern_t music_pattern3;
+static pattern_t music_pattern4;
+static pattern_t music_pattern5;
+static pattern_t music_pattern6;
+static pattern_t music_pattern7;
+static track_t music_track = {
+    .title = "Music",
+    .patterns = {
+        &music_pattern0,
+        &music_pattern1,
+        &music_pattern2,
+        &music_pattern3,
+        &music_pattern4,
+        &music_pattern5,
+        &music_pattern6,
+        &music_pattern7,
+    }
+};
 
 /* Snapshot of key events for one update tick. */
 typedef struct {
@@ -77,6 +111,7 @@ typedef struct {
     uint8_t enter;
     uint8_t space;
     uint8_t quit;
+    uint8_t toggle_audio_mode;
     uint8_t hold_toggle[CARD_COUNT];
 } KeyEvents;
 
@@ -153,6 +188,11 @@ static void draw_splash_chip_block(uint8_t x, uint8_t y, uint8_t chip_tl, uint8_
 static void draw_splash_border(void);
 static void render_splash_screen(void);
 static void run_splash_blocking(void);
+static void start_splash_music(void);
+static void start_game_music(void);
+static void tick_current_music(void);
+static void stop_current_music(void);
+static void apply_game_audio_mode(void);
 static void poll_keys(KeyEvents* ev);
 
 /* Card IDs are 0..51, grouped by suits in blocks of 13. */
@@ -503,13 +543,15 @@ static void run_splash_blocking(void)
     keyboard_flush();
     controller_flush();
 
+    start_splash_music();
+
     while (1) {
         uint8_t buf[32];
         uint16_t size = sizeof(buf);
 
         sound_loop();
+        tick_current_music();
         entropy++;
-        draw_splash_border();
 
         if (read(DEV_STDIN, buf, &size) == ERR_SUCCESS && size > 0) {
             for (uint16_t i = 0; i < size; i++) {
@@ -529,6 +571,7 @@ static void run_splash_blocking(void)
     }
 
 splash_pressed:
+    stop_current_music();
     msleep(40);
     while (1) {
         uint8_t buf[16];
@@ -552,6 +595,85 @@ splash_pressed:
 
     keyboard_flush();
     controller_flush();
+}
+
+static void start_splash_music(void)
+{
+    if (!splash_music_ready) {
+        current_music_mode = 0;
+        return;
+    }
+    if (loaded_music_index != 0) {
+        if (load_zmt(&music_track, 0) == ERR_SUCCESS) {
+            loaded_music_index = 0;
+        } else {
+            current_music_mode = 0;
+            return;
+        }
+    }
+    zmt_sound_off();
+    zmt_track_reset(&music_track, 1);
+    current_music_mode = 1;
+}
+
+static void start_game_music(void)
+{
+    if (game_cards_sfx_mode) {
+        current_music_mode = 0;
+        return;
+    }
+    if (!game_music_ready) {
+        current_music_mode = 0;
+        return;
+    }
+    if (loaded_music_index != 1) {
+        if (load_zmt(&music_track, 1) == ERR_SUCCESS) {
+            loaded_music_index = 1;
+        } else {
+            current_music_mode = 0;
+            return;
+        }
+    }
+    zmt_sound_off();
+    zmt_track_reset(&music_track, 1);
+    current_music_mode = 2;
+}
+
+static void tick_current_music(void)
+{
+    if (current_music_mode == 1 && splash_music_ready) {
+        /* Splash track authored with arrangement flow. */
+        zmt_tick(&music_track, 1);
+    } else if (current_music_mode == 2 && game_music_ready) {
+        /* Gameplay track uses arrangement flow (zmt_tick(..., 1)). */
+        zmt_tick(&music_track, 1);
+    }
+}
+
+static void stop_current_music(void)
+{
+    zmt_sound_off();
+    current_music_mode = 0;
+}
+
+static void apply_game_audio_mode(void)
+{
+    if (game_cards_sfx_mode) {
+        /* Card-SFX-only mode: silence gameplay music. */
+        if (current_music_mode == 2) {
+            stop_current_music();
+        }
+        /*
+         * After tracker shutdown, restore sound/tracker runtime state so
+         * plain sound_play() effects remain audible in SFX-only mode.
+         */
+        zmt_reset(VOL_50);
+    } else {
+        /* Music-only mode: ensure gameplay track is active outside splash. */
+        if (state != STATE_BET || !pending_bankrupt_reset) {
+            start_game_music();
+        }
+    }
 }
 
 /* Restore one map cell from original TMX layout (used to erase overlays). */
@@ -1107,6 +1229,7 @@ static void start_reveal_sequence(const uint8_t* slots, uint8_t len, uint8_t ini
     reveal_cooldown = 0;
     reveal_active = (reveal_len > 0);
     reveal_sfx_pending_mask = 0;
+
     /* Visibility masks changed; redraw card region conservatively. */
     mark_all_slots_dirty();
 
@@ -1145,6 +1268,10 @@ static void update_reveal_sequence(void)
 
 static void play_card_place_sound(void)
 {
+    if (!game_cards_sfx_mode) {
+        return;
+    }
+
     uint8_t jitter = (uint8_t)(rand8_quick() & CARD_SFX_JITTER_MASK);
     Sound* tap = sound_get(CARD_SOUND);
     if (tap != NULL) {
@@ -1193,6 +1320,7 @@ static void perform_bankrupt_reset_with_splash(void)
     render_splash_screen();
     run_splash_blocking();
     render_table();
+    start_game_music();
 
     credits = RESET_CREDITS;
     bet = 1;
@@ -1202,7 +1330,6 @@ static void perform_bankrupt_reset_with_splash(void)
     reveal_active = 0;
     reveal_mask = 0;
     start_reveal_sequence(all_slots, CARD_COUNT, 0);
-    mark_all_slots_dirty();
     suppress_enter_ticks = 8;
     confirm_armed = 0;
 
@@ -1226,7 +1353,6 @@ static void return_to_bet_phase(void)
     reveal_active = 0;
     reveal_mask = 0;
     start_reveal_sequence(all_slots, CARD_COUNT, 0);
-    mark_all_slots_dirty();
     state = STATE_BET;
     clamp_bet_to_credits();
     suppress_enter_ticks = 8;
@@ -1272,6 +1398,7 @@ static void poll_keys(KeyEvents* ev)
                 case KB_KEY_D: ev->hold_toggle[2] = 1; break;
                 case KB_KEY_F: ev->hold_toggle[3] = 1; break;
                 case KB_KEY_G: ev->hold_toggle[4] = 1; break;
+                case KB_KEY_P: ev->toggle_audio_mode = 1; break;
                 case KB_RIGHT_SHIFT:
                 case KB_KEY_QUOTE:
                     ev->quit = 1;
@@ -1309,6 +1436,30 @@ void init(void)
     }
 
     sound_init();
+    if (load_zmt(&music_track, 0) == ERR_SUCCESS) {
+        splash_music_ready = 1;
+        loaded_music_index = 0;
+    } else {
+        splash_music_ready = 0;
+        printf("Warning: failed to load splash music track\n");
+    }
+    if (load_zmt(&music_track, 1) == ERR_SUCCESS) {
+        game_music_ready = 1;
+        loaded_music_index = 1;
+    } else {
+        game_music_ready = 0;
+        printf("Warning: failed to load gameplay music track\n");
+    }
+    if (splash_music_ready) {
+        /* Ensure splash music is staged for first screen. */
+        if (load_zmt(&music_track, 0) == ERR_SUCCESS) {
+            loaded_music_index = 0;
+        } else {
+            splash_music_ready = 0;
+            loaded_music_index = 0xFF;
+        }
+    }
+
     Sound* card_sound = sound_get(CARD_SOUND);
     if (card_sound != NULL) {
         card_sound->waveform = CARD_SFX_WAVEFORM;
@@ -1342,9 +1493,9 @@ void init(void)
     render_splash_screen();
     gfx_enable_screen(1);
     run_splash_blocking();
+    start_game_music();
 
     render_table();
-    mark_all_slots_dirty();
 
     seed_rng_from_time();
     shuffle_deck();
@@ -1361,6 +1512,7 @@ void init(void)
 void deinit(void)
 {
     /* Restore text screen before exiting back to shell/system. */
+    stop_current_music();
     sound_stop_all();
     sound_deinit();
     /* Close persistent asset streams opened by assets.c optimization. */
@@ -1373,6 +1525,7 @@ void update(void)
     /* Game logic tick: input/state transitions only (no VRAM drawing here). */
     KeyEvents ev;
     sound_loop();
+    tick_current_music();
     update_reveal_sequence();
     poll_keys(&ev);
     entropy++;
@@ -1392,6 +1545,11 @@ void update(void)
     if (pending_bankrupt_reset) {
         perform_bankrupt_reset_with_splash();
         return;
+    }
+
+    if (ev.toggle_audio_mode) {
+        game_cards_sfx_mode ^= 1;
+        apply_game_audio_mode();
     }
 
     if (state == STATE_HOLD) {

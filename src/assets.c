@@ -2,10 +2,17 @@
 #include <stdint.h>
 #include <string.h>
 
+#include <zos_errors.h>
 #include <zos_vfs.h>
 #include <zvb_gfx.h>
+#include <zgdk/sound/tracker.h>
 
 #include "assets.h"
+
+extern uint8_t _zmt_track1_start;
+extern uint8_t _zmt_track1_end;
+extern uint8_t _zmt_track2_start;
+extern uint8_t _zmt_track2_end;
 
 #define ASSET_IO_CHUNK 128
 #define TILE_BYTES 256
@@ -532,4 +539,32 @@ gfx_error load_card_tiles(gfx_context* ctx, uint8_t card, uint16_t dst_from_byte
     }
 
     return GFX_SUCCESS;
+}
+
+zos_err_t load_zmt(track_t* track, uint8_t index)
+{
+    zmt_reset(VOL_50);
+    switch (index) {
+        case 0: {
+            const size_t size = &_zmt_track1_end - &_zmt_track1_start;
+            return zmt_rom_load(track, &_zmt_track1_start, size);
+        } break;
+        case 1: {
+            const size_t size = &_zmt_track2_end - &_zmt_track2_start;
+            return zmt_rom_load(track, &_zmt_track2_start, size);
+        } break;
+    }
+    return ERR_NOT_A_FILE;
+}
+
+void __assets__(void) __naked
+{
+    __asm__(
+        "__zmt_track1_start:\n"
+        "    .incbin \"assets/splash.zmt\"\n"
+        "__zmt_track1_end:\n"
+
+        "__zmt_track2_start:\n"
+        "    .incbin \"assets/music.zmt\"\n"
+        "__zmt_track2_end:\n");
 }
