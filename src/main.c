@@ -41,53 +41,53 @@
 gfx_context vctx;
 
 /* Current five cards on the table and working deck state. */
-static PokerCard cards[CARD_COUNT];
-static uint8_t deck[DECK_SIZE];
-static uint8_t deck_pos = 0;
+PokerCard cards[CARD_COUNT];
+uint8_t deck[DECK_SIZE];
+uint8_t deck_pos = 0;
 
 /* High-level game flow: bet -> hold/draw -> result -> bet. */
-static GameState state = STATE_BET;
+GameState state = STATE_BET;
 
 /* Persistent player/game values. */
-static uint16_t credits = INITIAL_CREDITS;
-static uint8_t bet = 1;
-static uint16_t win_amount = 0;
+uint16_t credits = INITIAL_CREDITS;
+uint8_t bet = 1;
+uint16_t win_amount = 0;
 
 /* UI state flags. */
-static uint8_t show_win_banner = 0;
-static uint8_t show_card_faces = 0;
+uint8_t show_win_banner = 0;
+uint8_t show_card_faces = 0;
 static uint8_t needs_redraw = 1;
 static uint8_t needs_hud_redraw = 0;
-static char win_banner_text[36] = "YOU HAVE WON!";
+char win_banner_text[36] = "YOU HAVE WON!";
 
 /* Small entropy accumulator mixed into RNG seed values. */
-static uint16_t entropy = 1;
+uint16_t entropy = 1;
 static uint8_t rng_seeded = 0;
-static uint8_t reveal_mask = 0x1F;
+uint8_t reveal_mask = 0x1F;
 static uint8_t reveal_slots[CARD_COUNT];
 static uint8_t reveal_len = 0;
 static uint8_t reveal_index = 0;
 static uint8_t reveal_cooldown = 0;
 static uint8_t reveal_active = 0;
 /* Per-slot one-shot SFX trigger, consumed in render_cards() when slot is drawn. */
-static uint8_t reveal_sfx_pending_mask = 0;
+uint8_t reveal_sfx_pending_mask = 0;
 /* Deferred game-over transition to splash/reset, executed safely in update(). */
-static uint8_t pending_bankrupt_reset = 0;
+uint8_t pending_bankrupt_reset = 0;
 /* Music availability flags and current playback mode. */
-static uint8_t splash_music_ready = 0;
-static uint8_t game_music_ready = 0;
-static uint8_t current_music_mode = 0; /* 0=off, 1=splash, 2=game */
-static uint8_t loaded_music_index = 0xFF;
+uint8_t splash_music_ready = 0;
+uint8_t game_music_ready = 0;
+uint8_t current_music_mode = 0; /* 0=off, 1=splash, 2=game */
+uint8_t loaded_music_index = 0xFF;
 /* Gameplay audio mode toggle (P):
  * 0 = music-only (card SFX muted)
  * 1 = card-SFX-only (gameplay track paused)
  */
-static uint8_t game_cards_sfx_mode = 0;
+uint8_t game_cards_sfx_mode = 0;
 /* Reusable static scratch buffers to avoid stack-heavy local arrays on SDCC. */
-static uint16_t scratch_gid_grid[SRC_CARD_H][SRC_CARD_W];
+uint16_t scratch_gid_grid[SRC_CARD_H][SRC_CARD_W];
 static uint8_t draw_hand_cards_buf[CARD_COUNT];
 static uint8_t draw_hand_slots_buf[CARD_COUNT];
-static char hud_num_buf[6];
+char hud_num_buf[6];
 /* Shared card-component GID scratch list for init preload path. */
 static uint16_t component_gids_buf[CARD_SHARED_TILE_CAPACITY];
 
@@ -100,7 +100,7 @@ static pattern_t music_pattern4;
 static pattern_t music_pattern5;
 static pattern_t music_pattern6;
 static pattern_t music_pattern7;
-static track_t music_track = {
+track_t music_track = {
     .title = "Music",
     .patterns = {
         &music_pattern0,
@@ -130,16 +130,16 @@ static uint8_t suppress_enter_ticks = 0;
 /* Requires Enter/Space release before accepting next confirm action. */
 static uint8_t confirm_armed = 0;
 /* Per-slot render invalidation mask for incremental redraws. */
-static uint8_t dirty_slots[CARD_COUNT];
+uint8_t dirty_slots[CARD_COUNT];
 /* Forces one pass over all slots (startup/phase reset). */
-static uint8_t full_redraw = 1;
+uint8_t full_redraw = 1;
 
 /* Map GID -> runtime tile ID remap generated from layout_map.h usage. */
-static uint16_t mapped_gids[MAP_TILE_CAPACITY];
-static uint8_t mapped_tiles[MAP_TILE_CAPACITY];
-static uint8_t mapped_count = 0;
+uint16_t mapped_gids[MAP_TILE_CAPACITY];
+uint8_t mapped_tiles[MAP_TILE_CAPACITY];
+uint8_t mapped_count = 0;
 /* Runtime mapping for shared card-component tiles (source GID -> runtime tile). */
-static uint8_t card_gid_to_runtime[CARD_TILESET_MAX_GID + 1];
+uint8_t card_gid_to_runtime[CARD_TILESET_MAX_GID + 1];
 /* One-shot diagnostics if a GID ever falls back at runtime. */
 static uint8_t card_gid_missing_warned[CARD_TILESET_MAX_GID + 1];
 /* Cached splash background tile (layer 0) for space/fallback characters. */
@@ -148,21 +148,21 @@ static uint8_t splash_bg_tile = FONT_SPACE_TILE;
 static const uint8_t overlay_empty_tile = 0;
 
 /* Position of each playable card slot (top-left tile of 3x4 card). */
-static const uint8_t slot_x[CARD_COUNT] = {5, 12, 19, 26, 33};
-static const uint8_t slot_y = 21;
+const uint8_t slot_x[CARD_COUNT] = {5, 12, 19, 26, 33};
+const uint8_t slot_y = 21;
 static const uint8_t all_slots[CARD_COUNT] = {0, 1, 2, 3, 4};
 
 /* Text anchor per card for "HOLD" labels in the bottom panel. */
-static const uint8_t hold_x[CARD_COUNT] = {4, 11, 18, 25, 32};
-static const uint8_t hold_y = 27;
+const uint8_t hold_x[CARD_COUNT] = {4, 11, 18, 25, 32};
+const uint8_t hold_y = 27;
 
 /* HUD numeric fields in tiles. */
-static const uint8_t bet_x = 6;
-static const uint8_t bet_y = 17;
-static const uint8_t win_x = 19;
-static const uint8_t win_y = 17;
-static const uint8_t credit_x = 34;
-static const uint8_t credit_y = 17;
+const uint8_t bet_x = 6;
+const uint8_t bet_y = 17;
+const uint8_t win_x = 19;
+const uint8_t win_y = 17;
+const uint8_t credit_x = 34;
+const uint8_t credit_y = 17;
 
 /* Critical source GIDs used outside TMX map rendering. */
 static const uint16_t kHoldFrameSourceGid = 105;
@@ -206,7 +206,7 @@ static void render_splash_screen(void);
 static void poll_keys(KeyEvents* ev);
 
 /* Translate TMX GID to the runtime tile ID loaded into VRAM. */
-static uint8_t map_gid_to_tile(uint16_t gid)
+uint8_t map_gid_to_tile(uint16_t gid)
 {
     for (uint8_t i = 0; i < mapped_count; i++) {
         if (mapped_gids[i] == gid) {
@@ -278,7 +278,7 @@ static uint8_t validate_startup_tiles(void)
 }
 #endif
 
-static uint8_t map_card_gid_to_tile(uint16_t gid)
+uint8_t map_card_gid_to_tile(uint16_t gid)
 {
     if (gid == 0 || gid > CARD_TILESET_MAX_GID) {
         printf("Card tile fallback: invalid source GID %u\n", gid);
@@ -952,72 +952,6 @@ void init(void)
             splash_music_ready = 0;
             loaded_music_index = 0xFF;
         }
-    }
-
-    {
-        AudioBindings audio_bindings = {
-            .splash_music_ready = &splash_music_ready,
-            .game_music_ready = &game_music_ready,
-            .current_music_mode = &current_music_mode,
-            .loaded_music_index = &loaded_music_index,
-            .game_cards_sfx_mode = &game_cards_sfx_mode,
-            .entropy = &entropy,
-            .state = &state,
-            .pending_bankrupt_reset = &pending_bankrupt_reset,
-            .music_track = &music_track,
-        };
-        audio_bind(&audio_bindings);
-    }
-    {
-        GameplayBindings gameplay_bindings = {
-            .deck = deck,
-            .deck_pos = &deck_pos,
-        };
-        gameplay_bind(&gameplay_bindings);
-    }
-    {
-        RenderBindings render_bindings = {
-            .vctx = &vctx,
-            .cards = cards,
-            .state = &state,
-            .credits = &credits,
-            .bet = &bet,
-            .win_amount = &win_amount,
-            .show_win_banner = &show_win_banner,
-            .show_card_faces = &show_card_faces,
-            .dirty_slots = dirty_slots,
-            .full_redraw = &full_redraw,
-            .reveal_mask = &reveal_mask,
-            .reveal_sfx_pending_mask = &reveal_sfx_pending_mask,
-            .win_banner_text = win_banner_text,
-            .hud_num_buf = hud_num_buf,
-            .scratch_gid_grid = scratch_gid_grid,
-            .mapped_gids = mapped_gids,
-            .mapped_tiles = mapped_tiles,
-            .mapped_count = &mapped_count,
-            .card_gid_to_runtime = card_gid_to_runtime,
-            .slot_x = slot_x,
-            .slot_y = &slot_y,
-            .hold_x = hold_x,
-            .hold_y = &hold_y,
-            .bet_x = &bet_x,
-            .bet_y = &bet_y,
-            .win_x = &win_x,
-            .win_y = &win_y,
-            .credit_x = &credit_x,
-            .credit_y = &credit_y,
-            .map_gid_to_tile_fn = map_gid_to_tile,
-            .map_card_gid_to_tile_fn = map_card_gid_to_tile,
-        };
-        render_bind(&render_bindings);
-    }
-    {
-        SplashBindings splash_bindings = {
-            .vctx = &vctx,
-            .entropy = &entropy,
-            .quit_cb = deinit,
-        };
-        splash_bind(&splash_bindings);
     }
 
     init_layout_tiles();
