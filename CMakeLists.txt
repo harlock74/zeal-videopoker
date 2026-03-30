@@ -8,7 +8,7 @@ project(zpoker C ASM)
 option(CONFIG_VALIDATE "Enable startup validation checks" OFF)
 
 add_executable(zpoker
-    src/videopoker.c
+    src/main.c
     src/audio.c
     src/splash.c
     src/gameplay.c

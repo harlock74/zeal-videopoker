@@ -2,6 +2,10 @@
 
 Video Poker for Zeal 8-bit Computer.
 
+## Development Notes
+
+- Ongoing change log: `DEV_JOURNAL.md`
+
 ## Game Flow
 
 1. **Bet phase (`DEAL`)**
@@ -54,7 +58,7 @@ and re-enters the bet phase.
 
 ## Code Structure
 
-Main gameplay is in `src/videopoker.c`.
+Main gameplay is in `src/main.c`.
 
 - `init()`: input/video init, asset loading, map/font setup, startup checks, shared card tile init
 - `validate_startup_tiles()`: validates critical UI/font/back GIDs at startup

@@ -11,15 +11,12 @@
 #include "audio.h"
 #include "splash.h"
 
-static SplashBindings g_splash = {0};
+extern gfx_context vctx;
+extern uint16_t entropy;
+
 /* Static input buffers reduce stack usage in splash loop on SDCC. */
 static uint8_t g_splash_read_buf[32];
 static uint8_t g_splash_release_buf[16];
-
-void splash_bind(const SplashBindings* bindings)
-{
-    g_splash = *bindings;
-}
 
 /* Keep splash prompt cadence local to the splash module. */
 static const uint8_t kSplashBlinkFrames = 24;
@@ -40,7 +37,7 @@ void splash_run_blocking(void (*draw_prompt)(uint8_t visible))
 
         sound_loop();
         tick_current_music();
-        (*g_splash.entropy)++;
+        entropy++;
 
         if (read(DEV_STDIN, g_splash_read_buf, &size) == ERR_SUCCESS && size > 0) {
             for (uint16_t i = 0; i < size; i++) {
@@ -49,14 +46,14 @@ void splash_run_blocking(void (*draw_prompt)(uint8_t visible))
                     goto splash_pressed;
                 }
                 if (key == KB_KEY_QUOTE || key == KB_RIGHT_SHIFT) {
-                    g_splash.quit_cb();
+                    deinit();
                     exit(0);
                 }
             }
         }
 
-        gfx_wait_vblank(g_splash.vctx);
-        gfx_wait_end_vblank(g_splash.vctx);
+        gfx_wait_vblank(&vctx);
+        gfx_wait_end_vblank(&vctx);
 
         blink_counter++;
         if (blink_counter >= kSplashBlinkFrames) {
@@ -84,8 +81,8 @@ splash_pressed:
         if (!held) {
             break;
         }
-        gfx_wait_vblank(g_splash.vctx);
-        gfx_wait_end_vblank(g_splash.vctx);
+        gfx_wait_vblank(&vctx);
+        gfx_wait_end_vblank(&vctx);
     }
 
     keyboard_flush();

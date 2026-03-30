@@ -8,6 +8,16 @@
 #include "assets.h"
 #include "audio.h"
 
+extern uint8_t splash_music_ready;
+extern uint8_t game_music_ready;
+extern uint8_t current_music_mode;
+extern uint8_t loaded_music_index;
+extern uint8_t game_cards_sfx_mode;
+extern uint16_t entropy;
+extern GameState state;
+extern uint8_t pending_bankrupt_reset;
+extern track_t music_track;
+
 /* Keep audio tuning local to the audio module. */
 #define CARD_SOUND 0
 #define CARD_SFX_BASE_FREQ 10
@@ -15,77 +25,70 @@
 #define CARD_SFX_DURATION 1
 #define CARD_SFX_WAVEFORM WAV_SAWTOOTH
 
-static AudioBindings g_audio = {0};
-
-void audio_bind(const AudioBindings* bindings)
-{
-    g_audio = *bindings;
-}
-
 void start_splash_music(void)
 {
-    if (!(*g_audio.splash_music_ready)) {
-        *g_audio.current_music_mode = 0;
+    if (!splash_music_ready) {
+        current_music_mode = 0;
         return;
     }
-    if (*g_audio.loaded_music_index != 0) {
-        if (load_zmt(g_audio.music_track, 0) == ERR_SUCCESS) {
-            *g_audio.loaded_music_index = 0;
+    if (loaded_music_index != 0) {
+        if (load_zmt(&music_track, 0) == ERR_SUCCESS) {
+            loaded_music_index = 0;
         } else {
-            *g_audio.current_music_mode = 0;
+            current_music_mode = 0;
             return;
         }
     }
     zmt_sound_off();
-    zmt_track_reset(g_audio.music_track, 1);
-    *g_audio.current_music_mode = 1;
+    zmt_track_reset(&music_track, 1);
+    current_music_mode = 1;
 }
 
 void start_game_music(void)
 {
-    if (*g_audio.game_cards_sfx_mode) {
-        *g_audio.current_music_mode = 0;
+    if (game_cards_sfx_mode) {
+        current_music_mode = 0;
         return;
     }
-    if (!(*g_audio.game_music_ready)) {
-        *g_audio.current_music_mode = 0;
+    if (!game_music_ready) {
+        current_music_mode = 0;
         return;
     }
-    if (*g_audio.loaded_music_index != 1) {
-        if (load_zmt(g_audio.music_track, 1) == ERR_SUCCESS) {
-            *g_audio.loaded_music_index = 1;
+    if (loaded_music_index != 1) {
+        if (load_zmt(&music_track, 1) == ERR_SUCCESS) {
+            loaded_music_index = 1;
         } else {
-            *g_audio.current_music_mode = 0;
+            current_music_mode = 0;
             return;
         }
     }
     zmt_sound_off();
-    zmt_track_reset(g_audio.music_track, 1);
-    *g_audio.current_music_mode = 2;
+    zmt_track_reset(&music_track, 1);
+    current_music_mode = 2;
 }
 
 void tick_current_music(void)
 {
-    if (*g_audio.current_music_mode == 1 && *g_audio.splash_music_ready) {
+    if (current_music_mode == 1 && splash_music_ready) {
         /* Splash track authored with arrangement flow. */
-        zmt_tick(g_audio.music_track, 1);
-    } else if (*g_audio.current_music_mode == 2 && *g_audio.game_music_ready) {
+        zmt_tick(&music_track, 1);
+    } else if (current_music_mode == 2 && game_music_ready) {
         /* Gameplay track uses arrangement flow (zmt_tick(..., 1)). */
-        zmt_tick(g_audio.music_track, 1);
+        zmt_tick(&music_track, 1);
     }
 }
 
 void stop_current_music(void)
 {
     zmt_sound_off();
-    *g_audio.current_music_mode = 0;
+    current_music_mode = 0;
 }
 
 void apply_game_audio_mode(void)
 {
-    if (*g_audio.game_cards_sfx_mode) {
+    if (game_cards_sfx_mode) {
         /* Card-SFX-only mode: silence gameplay music. */
-        if (*g_audio.current_music_mode == 2) {
+        if (current_music_mode == 2) {
             stop_current_music();
         }
         /*
@@ -95,7 +98,7 @@ void apply_game_audio_mode(void)
         zmt_reset(VOL_50);
     } else {
         /* Music-only mode: ensure gameplay track is active outside splash. */
-        if (*g_audio.state != STATE_BET || !(*g_audio.pending_bankrupt_reset)) {
+        if (state != STATE_BET || !pending_bankrupt_reset) {
             start_game_music();
         }
     }
@@ -103,7 +106,7 @@ void apply_game_audio_mode(void)
 
 void play_card_place_sound(void)
 {
-    if (*g_audio.game_cards_sfx_mode == 0) {
+    if (game_cards_sfx_mode == 0) {
         return;
     }
     /*
@@ -119,5 +122,5 @@ void play_card_place_sound(void)
     if (tap != NULL) {
         tap->waveform = CARD_SFX_WAVEFORM;
     }
-    *g_audio.entropy ^= (uint16_t)(freq << 1);
+    entropy ^= (uint16_t)(freq << 1);
 }

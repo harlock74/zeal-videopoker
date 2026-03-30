@@ -6,17 +6,11 @@
 #include "videopoker.h"
 #include "gameplay.h"
 
-static uint8_t* g_deck = NULL;
-static uint8_t* g_deck_pos = NULL;
+extern uint8_t deck[DECK_SIZE];
+extern uint8_t deck_pos;
 /* Reusable evaluation histograms (avoids repeated stack arrays on SDCC). */
 static uint8_t g_rank_counts[13];
 static uint8_t g_suit_counts[4];
-
-void gameplay_bind(const GameplayBindings* bindings)
-{
-    g_deck = bindings->deck;
-    g_deck_pos = bindings->deck_pos;
-}
 
 /* Card IDs are 0..51, grouped by suits in blocks of 13. */
 static uint8_t card_rank(uint8_t card)
@@ -73,26 +67,26 @@ void shuffle_deck(void)
 {
     /* Fisher-Yates shuffle over full 52-card deck. */
     for (uint8_t i = 0; i < DECK_SIZE; i++) {
-        g_deck[i] = i;
+        deck[i] = i;
     }
 
     for (uint8_t i = DECK_SIZE - 1; i > 0; i--) {
         uint8_t j = rand8_quick() % (i + 1);
-        uint8_t tmp = g_deck[i];
-        g_deck[i] = g_deck[j];
-        g_deck[j] = tmp;
+        uint8_t tmp = deck[i];
+        deck[i] = deck[j];
+        deck[j] = tmp;
     }
 
-    *g_deck_pos = 0;
+    deck_pos = 0;
 }
 
 uint8_t pop_deck(void)
 {
     /* Safety fallback if deck is exhausted unexpectedly. */
-    if (*g_deck_pos >= DECK_SIZE) {
+    if (deck_pos >= DECK_SIZE) {
         shuffle_deck();
     }
-    return g_deck[(*g_deck_pos)++];
+    return deck[deck_pos++];
 }
 
 HandResult evaluate_hand(const uint8_t hand[CARD_COUNT])
