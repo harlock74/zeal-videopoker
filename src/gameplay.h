@@ -2,7 +2,7 @@
 
 #include <stdint.h>
 
-#include "videopoker.h"
+#include "main.h"
 
 /* Hand evaluation logic (pay table resolution). */
 HandResult evaluate_hand(const uint8_t hand[CARD_COUNT]);

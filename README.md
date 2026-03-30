@@ -84,7 +84,7 @@ Supporting files:
 
 - `src/assets.c` / `src/assets.h`: palette/tile loading helpers + runtime card compositor helpers
 - `src/layout_map.h`: generated TMX map header
-- `src/videopoker.h`: gameplay and rendering constants
+- `src/main.h`: gameplay and rendering constants
 - `CARD_TILE_MAPPING.md`: single mapping reference for `cards.gif` positions and runtime GIDs
 
 ## Rendering Notes

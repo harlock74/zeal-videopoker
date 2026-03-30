@@ -6,42 +6,11 @@
 #include <zgdk.h>
 
 #include "layout_map.h"
-#include "videopoker.h"
+#include "main.h"
+#include "app_state.h"
 #include "assets.h"
 #include "audio.h"
 #include "render.h"
-
-extern gfx_context vctx;
-extern PokerCard cards[CARD_COUNT];
-extern GameState state;
-extern uint16_t credits;
-extern uint8_t bet;
-extern uint16_t win_amount;
-extern uint8_t show_win_banner;
-extern uint8_t show_card_faces;
-extern uint8_t dirty_slots[CARD_COUNT];
-extern uint8_t full_redraw;
-extern uint8_t reveal_mask;
-extern uint8_t reveal_sfx_pending_mask;
-extern char win_banner_text[36];
-extern char hud_num_buf[6];
-extern uint16_t scratch_gid_grid[SRC_CARD_H][SRC_CARD_W];
-extern uint16_t mapped_gids[MAP_TILE_CAPACITY];
-extern uint8_t mapped_tiles[MAP_TILE_CAPACITY];
-extern uint8_t mapped_count;
-extern const uint8_t slot_x[CARD_COUNT];
-extern const uint8_t slot_y;
-extern const uint8_t hold_x[CARD_COUNT];
-extern const uint8_t hold_y;
-extern const uint8_t bet_x;
-extern const uint8_t bet_y;
-extern const uint8_t win_x;
-extern const uint8_t win_y;
-extern const uint8_t credit_x;
-extern const uint8_t credit_y;
-
-extern uint8_t map_gid_to_tile(uint16_t gid);
-extern uint8_t map_card_gid_to_tile(uint16_t gid);
 
 /* Restore one map cell from original TMX layout (used to erase overlays). */
 static void restore_map_cell(uint8_t x, uint8_t y)

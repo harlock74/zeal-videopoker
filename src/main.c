@@ -15,7 +15,7 @@
 
 #include "assets.h"
 #include "layout_map.h"
-#include "videopoker.h"
+#include "main.h"
 #include "audio.h"
 #include "splash.h"
 #include "gameplay.h"
@@ -161,7 +161,7 @@ const uint8_t bet_x = 6;
 const uint8_t bet_y = 17;
 const uint8_t win_x = 19;
 const uint8_t win_y = 17;
-const uint8_t credit_x = 34;
+const uint8_t credit_x = 35;
 const uint8_t credit_y = 17;
 
 /* Critical source GIDs used outside TMX map rendering. */

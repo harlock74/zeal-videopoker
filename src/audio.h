@@ -2,7 +2,7 @@
 
 #include <stdint.h>
 
-#include "videopoker.h"
+#include "main.h"
 
 void start_splash_music(void);
 void start_game_music(void);

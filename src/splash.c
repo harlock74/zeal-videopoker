@@ -7,12 +7,10 @@
 #include <zvb_gfx.h>
 #include <zgdk.h>
 
-#include "videopoker.h"
+#include "main.h"
+#include "app_state.h"
 #include "audio.h"
 #include "splash.h"
-
-extern gfx_context vctx;
-extern uint16_t entropy;
 
 /* Static input buffers reduce stack usage in splash loop on SDCC. */
 static uint8_t g_splash_read_buf[32];

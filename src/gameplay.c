@@ -3,11 +3,9 @@
 
 #include <zgdk.h>
 
-#include "videopoker.h"
+#include "main.h"
+#include "app_state.h"
 #include "gameplay.h"
-
-extern uint8_t deck[DECK_SIZE];
-extern uint8_t deck_pos;
 /* Reusable evaluation histograms (avoids repeated stack arrays on SDCC). */
 static uint8_t g_rank_counts[13];
 static uint8_t g_suit_counts[4];

@@ -4,19 +4,10 @@
 #include <zgdk.h>
 #include <zgdk/sound/tracker.h>
 
-#include "videopoker.h"
+#include "main.h"
+#include "app_state.h"
 #include "assets.h"
 #include "audio.h"
-
-extern uint8_t splash_music_ready;
-extern uint8_t game_music_ready;
-extern uint8_t current_music_mode;
-extern uint8_t loaded_music_index;
-extern uint8_t game_cards_sfx_mode;
-extern uint16_t entropy;
-extern GameState state;
-extern uint8_t pending_bankrupt_reset;
-extern track_t music_track;
 
 /* Keep audio tuning local to the audio module. */
 #define CARD_SOUND 0
