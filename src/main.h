@@ -21,23 +21,17 @@
 #define SRC_CARD_H 4
 
 /*
- * Runtime tile allocation:
- *  - map tiles:   32..143
- *  - font tiles:  144..179
- *  - space tile:  180
- *  - hold frame:  181
- *  - shared card components: 184..255
+ * Direct tileset IDs (runtime tile = source GID - 1).
+ * These values correspond to cards.gif current font/overlay layout.
  */
-#define MAP_TILE_BASE 32
-#define MAP_TILE_CAPACITY 112
-
-#define FONT_DIGIT_TILE 144
-#define FONT_ALPHA_A_TILE 154
-#define FONT_ALPHA_N_TILE 167
-#define FONT_SPACE_TILE 180
-#define FONT_COLON_TILE 182
-#define FONT_EXCL_TILE 183
-#define HOLD_FRAME_TILE 181
+#define FONT_DIGIT_TILE 152
+#define FONT_ALPHA_A_TILE 162
+#define FONT_ALPHA_N_TILE 175
+/* Blank tile (GID 4 -> runtime tile 3) used as layer1 clear/space tile. */
+#define FONT_SPACE_TILE 3
+#define FONT_COLON_TILE 188
+#define FONT_EXCL_TILE 189
+#define HOLD_FRAME_TILE 119
 
 #define TILEMAP_LAYER 0
 

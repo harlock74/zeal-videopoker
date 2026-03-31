@@ -27,14 +27,10 @@
 #endif
 
 #define CARD_REVEAL_DELAY 4
-#define CARD_TILESET_COLUMNS 38
-#define CARD_TILESET_ROWS 5
-#define CARD_TILESET_MAX_GID (CARD_TILESET_COLUMNS * CARD_TILESET_ROWS)
+#define CARD_TILESET_MAX_GID 255
 #define FONT_DIGIT_COUNT 10
 #define FONT_ALPHA_COUNT 13
 #define LAYOUT_SPACE_SAMPLE_X 2
-#define CARD_SHARED_TILE_BASE 184
-#define CARD_SHARED_TILE_CAPACITY ((uint8_t)(256 - CARD_SHARED_TILE_BASE))
 
 /* Global graphics context used by ZVB drawing APIs. */
 gfx_context vctx;
@@ -74,9 +70,6 @@ uint16_t scratch_gid_grid[SRC_CARD_H][SRC_CARD_W];
 static uint8_t draw_hand_cards_buf[CARD_COUNT];
 static uint8_t draw_hand_slots_buf[CARD_COUNT];
 char hud_num_buf[6];
-/* Shared card-component GID scratch list for init preload path. */
-static uint16_t component_gids_buf[CARD_SHARED_TILE_CAPACITY];
-
 
 /* Snapshot of key events for one update tick. */
 typedef struct {
@@ -94,18 +87,10 @@ static uint8_t suppress_enter_ticks = 0;
 /* Requires Enter/Space release before accepting next confirm action. */
 static uint8_t confirm_armed = 0;
 
-/* Map GID -> runtime tile ID remap generated from layout_map.h usage. */
-uint16_t mapped_gids[MAP_TILE_CAPACITY];
-uint8_t mapped_tiles[MAP_TILE_CAPACITY];
-uint8_t mapped_count = 0;
-/* Runtime mapping for shared card-component tiles (source GID -> runtime tile). */
-uint8_t card_gid_to_runtime[CARD_TILESET_MAX_GID + 1];
-/* One-shot diagnostics if a GID ever falls back at runtime. */
-static uint8_t card_gid_missing_warned[CARD_TILESET_MAX_GID + 1];
 /* Cached splash background tile (layer 0) for space/fallback characters. */
 static uint8_t splash_bg_tile = FONT_SPACE_TILE;
 /* Layer1 clear tile (transparent/empty). */
-static const uint8_t overlay_empty_tile = 0;
+static const uint8_t overlay_empty_tile = FONT_SPACE_TILE;
 
 /* Position of each playable card slot (top-left tile of 3x4 card). */
 const uint8_t slot_x[CARD_COUNT] = {5, 12, 19, 26, 33};
@@ -152,10 +137,7 @@ static void perform_bankrupt_reset_with_splash(void);
 static void clamp_bet_to_credits(void);
 #if ZP_VALIDATE
 static uint8_t validate_startup_tiles(void);
-static uint8_t verify_card_component_coverage(void);
 #endif
-static uint8_t init_card_component_tiles(void);
-static uint8_t ensure_map_gid_loaded(uint16_t gid);
 static void clear_overlay_layer1(void);
 static void draw_splash_prompt(uint8_t visible);
 static void draw_splash_chip_block(uint8_t x, uint8_t y, uint8_t chip_tl, uint8_t chip_tr, uint8_t chip_bl, uint8_t chip_br);
@@ -166,26 +148,11 @@ static void poll_keys(KeyEvents* ev);
 /* Translate TMX GID to the runtime tile ID loaded into VRAM. */
 uint8_t map_gid_to_tile(uint16_t gid)
 {
-    for (uint8_t i = 0; i < mapped_count; i++) {
-        if (mapped_gids[i] == gid) {
-            return mapped_tiles[i];
-        }
+    if (gid == 0 || gid > CARD_TILESET_MAX_GID) {
+        return FONT_SPACE_TILE;
     }
-
-    return FONT_SPACE_TILE;
+    return (uint8_t)(gid - 1U);
 }
-
-#if ZP_VALIDATE
-static uint8_t is_gid_mapped(uint16_t gid)
-{
-    for (uint8_t i = 0; i < mapped_count; i++) {
-        if (mapped_gids[i] == gid) {
-            return 1;
-        }
-    }
-    return 0;
-}
-#endif
 
 #if ZP_VALIDATE
 static uint8_t validate_gid_range(uint16_t gid, const char* name)
@@ -227,173 +194,29 @@ static uint8_t validate_startup_tiles(void)
         return 0;
     }
 
-    if (!is_gid_mapped(space_gid)) {
-        printf("Tile self-check failed: space_bg GID %u missing from map remap\n", space_gid);
-        return 0;
-    }
-
     return 1;
 }
 #endif
 
 uint8_t map_card_gid_to_tile(uint16_t gid)
 {
-    if (gid == 0 || gid > CARD_TILESET_MAX_GID) {
-        printf("Card tile fallback: invalid source GID %u\n", gid);
-        return FONT_SPACE_TILE;
-    }
-
-    if (card_gid_to_runtime[gid] == 0) {
-        if (!card_gid_missing_warned[gid]) {
-            printf("Card tile fallback: source GID %u not preloaded in shared card pool\n", gid);
-            card_gid_missing_warned[gid] = 1;
-        }
-        return FONT_SPACE_TILE;
-    }
-
-    return card_gid_to_runtime[gid];
+    return map_gid_to_tile(gid);
 }
-
-static uint8_t ensure_map_gid_loaded(uint16_t gid)
-{
-    for (uint8_t i = 0; i < mapped_count; i++) {
-        if (mapped_gids[i] == gid) {
-            return 1;
-        }
-    }
-
-    if (mapped_count >= MAP_TILE_CAPACITY) {
-        printf("Map tile remap full, cannot add splash GID %u\n", gid);
-        return 0;
-    }
-
-    mapped_gids[mapped_count] = gid;
-    mapped_tiles[mapped_count] = (uint8_t)(MAP_TILE_BASE + mapped_count);
-    if (load_source_tile(&vctx, gid, (uint16_t)mapped_tiles[mapped_count] * TILE_SIZE) != GFX_SUCCESS) {
-        printf("Failed to load splash GID %u\n", gid);
-        return 0;
-    }
-
-    mapped_count++;
-    return 1;
-}
-
-static uint8_t init_card_component_tiles(void)
-{
-    uint8_t count = assets_collect_component_gids(component_gids_buf, CARD_SHARED_TILE_CAPACITY);
-
-    memset(card_gid_to_runtime, 0, sizeof(card_gid_to_runtime));
-    memset(card_gid_missing_warned, 0, sizeof(card_gid_missing_warned));
-
-    if (count == 0) {
-        printf("Card tile init failed: no component GIDs collected\n");
-        return 0;
-    }
-
-    if (count > CARD_SHARED_TILE_CAPACITY) {
-        printf("Card tile init failed: component count %u exceeds capacity %u\n", count, CARD_SHARED_TILE_CAPACITY);
-        return 0;
-    }
-
-    for (uint8_t i = 0; i < count; i++) {
-        uint16_t gid = component_gids_buf[i];
-        uint8_t runtime_tile = (uint8_t)(CARD_SHARED_TILE_BASE + i);
-
-#if ZP_VALIDATE
-        if (!validate_gid_range(gid, "card_component")) {
-            return 0;
-        }
-#endif
-
-        if (load_source_tile(&vctx, gid, (uint16_t)runtime_tile * TILE_SIZE) != GFX_SUCCESS) {
-            printf("Card tile init failed: load GID %u\n", gid);
-            return 0;
-        }
-
-        card_gid_to_runtime[gid] = runtime_tile;
-    }
-
-    return 1;
-}
-
-#if ZP_VALIDATE
-static uint8_t verify_card_component_coverage(void)
-{
-    for (uint8_t card = 0; card < DECK_SIZE; card++) {
-        assets_build_card_gid_grid(scratch_gid_grid, card);
-        for (uint8_t row = 0; row < SRC_CARD_H; row++) {
-            for (uint8_t col = 0; col < SRC_CARD_W; col++) {
-                uint16_t gid = scratch_gid_grid[row][col];
-                if (gid == 0 || gid > CARD_TILESET_MAX_GID) {
-                    printf("Card coverage check failed: card %u uses out-of-range GID %u\n", card, gid);
-                    return 0;
-                }
-                if (card_gid_to_runtime[gid] == 0) {
-                    printf("Card coverage check failed: card %u needs GID %u not in shared pool\n", card, gid);
-                    return 0;
-                }
-            }
-        }
-    }
-
-    assets_build_back_gid_grid(scratch_gid_grid);
-    for (uint8_t row = 0; row < SRC_CARD_H; row++) {
-        for (uint8_t col = 0; col < SRC_CARD_W; col++) {
-            uint16_t gid = scratch_gid_grid[row][col];
-            if (gid == 0 || gid > CARD_TILESET_MAX_GID) {
-                printf("Card coverage check failed: back grid uses out-of-range GID %u\n", gid);
-                return 0;
-            }
-            if (card_gid_to_runtime[gid] == 0) {
-                printf("Card coverage check failed: back grid needs GID %u not in shared pool\n", gid);
-                return 0;
-            }
-        }
-    }
-
-    return 1;
-}
-#endif
 
 static void load_ui_font_tiles(void)
 {
-    uint16_t space_gid = kLayoutGids[(hold_y * LAYOUT_W) + LAYOUT_SPACE_SAMPLE_X];
-
-    /* Frame tile used to highlight held cards (green suit-symbol tile). */
-    load_source_tile(&vctx, kHoldFrameSourceGid, (uint16_t)HOLD_FRAME_TILE * TILE_SIZE);
-
-    /* Space/background tile used to clear text areas cleanly. */
-    load_source_tile(&vctx, space_gid, (uint16_t)FONT_SPACE_TILE * TILE_SIZE);
-
-    /* Digits and A-Z are loaded from your font strip row in cards.gif. */
-    for (uint8_t i = 0; i < FONT_DIGIT_COUNT; i++) {
-        load_source_tile(&vctx, (uint16_t)(kDigitGidBase + i), (uint16_t)(FONT_DIGIT_TILE + i) * TILE_SIZE);
-    }
-
-    for (uint8_t i = 0; i < FONT_ALPHA_COUNT; i++) {
-        load_source_tile(&vctx, (uint16_t)(kAlphaAGidBase + i), (uint16_t)(FONT_ALPHA_A_TILE + i) * TILE_SIZE);
-    }
-
-    for (uint8_t i = 0; i < FONT_ALPHA_COUNT; i++) {
-        load_source_tile(&vctx, (uint16_t)(kAlphaNGidBase + i), (uint16_t)(FONT_ALPHA_N_TILE + i) * TILE_SIZE);
-    }
-
-    /* Punctuation tiles follow Z in the custom font strip. */
-    load_source_tile(&vctx, kColonGid, (uint16_t)FONT_COLON_TILE * TILE_SIZE);
-    load_source_tile(&vctx, kExclGid, (uint16_t)FONT_EXCL_TILE * TILE_SIZE);
-
     /*
      * nprint_string writes to layer 1; use transparent/empty tile for spaces
      * so clearing text does not leave blue artifacts on splash/game screens.
      */
     ascii_map(' ', 1, overlay_empty_tile);
-    ascii_map('0', 10, FONT_DIGIT_TILE);    // 0-9
-    ascii_map('A', 13, FONT_ALPHA_A_TILE);  // A-M
-    ascii_map('a', 13, FONT_ALPHA_A_TILE);  // A-M
-    ascii_map('N', 13, FONT_ALPHA_N_TILE);  // N-Z
-    ascii_map('n', 13, FONT_ALPHA_N_TILE);  // N-Z
-    ascii_map(':', 1, FONT_COLON_TILE);
-    ascii_map('!', 1, FONT_EXCL_TILE);
+    ascii_map('0', 10, map_gid_to_tile(kDigitGidBase));    // 0-9
+    ascii_map('A', 13, map_gid_to_tile(kAlphaAGidBase));   // A-M
+    ascii_map('a', 13, map_gid_to_tile(kAlphaAGidBase));   // A-M
+    ascii_map('N', 13, map_gid_to_tile(kAlphaNGidBase));   // N-Z
+    ascii_map('n', 13, map_gid_to_tile(kAlphaNGidBase));   // N-Z
+    ascii_map(':', 1, map_gid_to_tile(kColonGid));
+    ascii_map('!', 1, map_gid_to_tile(kExclGid));
 }
 
 static void clear_overlay_layer1(void)
@@ -864,12 +687,9 @@ void init(void)
     sound_init();
     audio_init_tracks();
 
-    init_layout_tiles();
-    if (!ensure_map_gid_loaded(kSplashChipTL) ||
-        !ensure_map_gid_loaded(kSplashChipTR) ||
-        !ensure_map_gid_loaded(kSplashChipBL) ||
-        !ensure_map_gid_loaded(kSplashChipBR)) {
-        printf("Failed to initialize splash border tiles.\n");
+    err = load_cards_tileset(&vctx);
+    if (err != GFX_SUCCESS) {
+        printf("Tileset load failed: %d\n", err);
         exit(1);
     }
 #if ZP_VALIDATE
@@ -879,16 +699,6 @@ void init(void)
     }
     if (assets_validate_card_tables(CARD_TILESET_MAX_GID) != GFX_SUCCESS) {
         printf("Card composition tile validation failed. Check cards.gif tile mappings.\n");
-        exit(1);
-    }
-#endif
-    if (!init_card_component_tiles()) {
-        printf("Card component tile preload failed.\n");
-        exit(1);
-    }
-#if ZP_VALIDATE
-    if (!verify_card_component_coverage()) {
-        printf("Card component coverage check failed.\n");
         exit(1);
     }
 #endif

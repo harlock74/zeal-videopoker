@@ -57,38 +57,6 @@ void draw_hold_frames(void)
     }
 }
 
-void init_layout_tiles(void)
-{
-    /* Load each unique GID from the TMX map exactly once into VRAM tile slots. */
-    mapped_count = 0;
-
-    for (uint16_t i = 0; i < (LAYOUT_W * LAYOUT_H); i++) {
-        uint16_t gid = kLayoutGids[i];
-        uint8_t found = 0;
-
-        for (uint8_t j = 0; j < mapped_count; j++) {
-            if (mapped_gids[j] == gid) {
-                found = 1;
-                break;
-            }
-        }
-
-        if (found) {
-            continue;
-        }
-
-        if (mapped_count >= MAP_TILE_CAPACITY) {
-            break;
-        }
-
-        mapped_gids[mapped_count] = gid;
-        mapped_tiles[mapped_count] = (uint8_t)(MAP_TILE_BASE + mapped_count);
-
-        load_source_tile(&vctx, gid, (uint16_t)mapped_tiles[mapped_count] * TILE_SIZE);
-        mapped_count++;
-    }
-}
-
 static void render_layout(void)
 {
     /* Paint the full static background UI from TMX-derived GID data. */

@@ -32,9 +32,6 @@ extern char win_banner_text[36];
 extern char hud_num_buf[6];
 
 extern uint16_t scratch_gid_grid[SRC_CARD_H][SRC_CARD_W];
-extern uint16_t mapped_gids[MAP_TILE_CAPACITY];
-extern uint8_t mapped_tiles[MAP_TILE_CAPACITY];
-extern uint8_t mapped_count;
 
 extern const uint8_t slot_x[CARD_COUNT];
 extern const uint8_t slot_y;
