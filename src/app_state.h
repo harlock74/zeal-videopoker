@@ -3,7 +3,6 @@
 #include <stdint.h>
 
 #include <zvb_gfx.h>
-#include <zgdk/sound/tracker.h>
 
 #include "main.h"
 
@@ -25,21 +24,10 @@ extern uint16_t win_amount;
 
 extern uint8_t show_win_banner;
 extern uint8_t show_card_faces;
-extern uint8_t reveal_mask;
-extern uint8_t reveal_sfx_pending_mask;
 extern uint8_t pending_bankrupt_reset;
 
 extern uint16_t entropy;
 
-extern uint8_t splash_music_ready;
-extern uint8_t game_music_ready;
-extern uint8_t current_music_mode;
-extern uint8_t loaded_music_index;
-extern uint8_t game_cards_sfx_mode;
-extern track_t music_track;
-
-extern uint8_t dirty_slots[CARD_COUNT];
-extern uint8_t full_redraw;
 extern char win_banner_text[36];
 extern char hud_num_buf[6];
 

@@ -1,4 +1,5 @@
 #include <stdint.h>
+#include <stdio.h>
 
 #include <zvb_sound.h>
 #include <zgdk.h>
@@ -15,6 +16,66 @@
 #define CARD_SFX_JITTER_MASK 0x03
 #define CARD_SFX_DURATION 1
 #define CARD_SFX_WAVEFORM WAV_SAWTOOTH
+
+/* Tracker storage owned by audio module. */
+static pattern_t music_pattern0;
+static pattern_t music_pattern1;
+static pattern_t music_pattern2;
+static pattern_t music_pattern3;
+static pattern_t music_pattern4;
+static pattern_t music_pattern5;
+static pattern_t music_pattern6;
+static pattern_t music_pattern7;
+static track_t music_track = {
+    .title = "Music",
+    .patterns = {
+        &music_pattern0,
+        &music_pattern1,
+        &music_pattern2,
+        &music_pattern3,
+        &music_pattern4,
+        &music_pattern5,
+        &music_pattern6,
+        &music_pattern7,
+    }
+};
+
+/* Audio state owned by this module. */
+static uint8_t splash_music_ready = 0;
+static uint8_t game_music_ready = 0;
+static uint8_t current_music_mode = 0; /* 0=off, 1=splash, 2=game */
+static uint8_t loaded_music_index = 0xFF;
+/* 0 = music-only (card SFX muted), 1 = card-SFX-only (gameplay track paused). */
+static uint8_t game_cards_sfx_mode = 0;
+
+void audio_init_tracks(void)
+{
+    if (load_zmt(&music_track, 0) == ERR_SUCCESS) {
+        splash_music_ready = 1;
+        loaded_music_index = 0;
+    } else {
+        splash_music_ready = 0;
+        printf("Warning: failed to load splash music track\n");
+    }
+
+    if (load_zmt(&music_track, 1) == ERR_SUCCESS) {
+        game_music_ready = 1;
+        loaded_music_index = 1;
+    } else {
+        game_music_ready = 0;
+        printf("Warning: failed to load gameplay music track\n");
+    }
+
+    if (splash_music_ready) {
+        /* Ensure splash music is staged for first screen. */
+        if (load_zmt(&music_track, 0) == ERR_SUCCESS) {
+            loaded_music_index = 0;
+        } else {
+            splash_music_ready = 0;
+            loaded_music_index = 0xFF;
+        }
+    }
+}
 
 void start_splash_music(void)
 {
@@ -75,7 +136,7 @@ void stop_current_music(void)
     current_music_mode = 0;
 }
 
-void apply_game_audio_mode(void)
+static void apply_game_audio_mode(void)
 {
     if (game_cards_sfx_mode) {
         /* Card-SFX-only mode: silence gameplay music. */
@@ -93,6 +154,12 @@ void apply_game_audio_mode(void)
             start_game_music();
         }
     }
+}
+
+void audio_toggle_game_audio_mode(void)
+{
+    game_cards_sfx_mode ^= 1;
+    apply_game_audio_mode();
 }
 
 void play_card_place_sound(void)

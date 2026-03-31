@@ -76,9 +76,9 @@ static const uint16_t kWhiteCardTileGid = 12;
 
 static const uint16_t kSuitGidBySuit[CARD_SUIT_COUNT] = {
     1,   /* Hearts */
-    42,  /* Diamonds */
-    124, /* Spades */
-    83   /* Clubs */
+    39,  /* Diamonds */
+    115, /* Spades */
+    77   /* Clubs */
 };
 
 /* Explicit suit->color mapping to avoid implicit dependency on suit ordering. */
@@ -94,32 +94,32 @@ static const uint16_t kRankGlyphRed[CARD_RANK_COUNT] = {
 };
 
 static const uint16_t kRankGlyphBlack[CARD_RANK_COUNT] = {
-    54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66
+    51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63
 };
 
 /* J and K are center-column portraits (top/mid/bottom) with red/black variants. */
 static const FaceColumn kJackFaceByColor[2] = {
-    {2, 43, 84},  /* Red J */
-    {3, 44, 85},  /* Black J */
+    {2, 40, 78},  /* Red J */
+    {3, 41, 79},  /* Black J */
 };
 
 static const FaceColumn kKingFaceByColor[2] = {
-    {10, 51, 92}, /* Red K */
-    {11, 52, 93}, /* Black K */
+    {10, 48, 86}, /* Red K */
+    {11, 49, 87}, /* Black K */
 };
 
 /* Q uses wider portrait fragments. */
 static const QueenFace kQueenFaceByColor[2] = {
-    {5, 45, 46, 47, 86, 87, 88}, /* Red Q */
-    {8, 48, 49, 50, 89, 90, 91}, /* Black Q */
+    {5, 42, 43, 44, 80, 81, 82}, /* Red Q */
+    {8, 45, 46, 47, 83, 84, 85}, /* Black Q */
 };
 
 /* Fixed 3x4 red-back card layout from cards.gif/cards.tmx. */
 static const uint16_t kBackCardGids[CARD_TILE_H][CARD_TILE_W] = {
-    {39, 40, 41},
-    {80, 81, 82},
-    {121, 122, 123},
-    {162, 163, 164},
+    {116, 117, 118},
+    {119, 120, 121},
+    {122, 123, 124},
+    {125, 126, 127},
 };
 
 /*

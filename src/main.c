@@ -11,7 +11,6 @@
 #include <zvb_gfx.h>
 #include <zvb_sound.h>
 #include <zgdk.h>
-#include <zgdk/sound/tracker.h>
 
 #include "assets.h"
 #include "layout_map.h"
@@ -28,7 +27,7 @@
 #endif
 
 #define CARD_REVEAL_DELAY 4
-#define CARD_TILESET_COLUMNS 41
+#define CARD_TILESET_COLUMNS 38
 #define CARD_TILESET_ROWS 5
 #define CARD_TILESET_MAX_GID (CARD_TILESET_COLUMNS * CARD_TILESET_ROWS)
 #define FONT_DIGIT_COUNT 10
@@ -63,26 +62,13 @@ char win_banner_text[36] = "YOU HAVE WON!";
 /* Small entropy accumulator mixed into RNG seed values. */
 uint16_t entropy = 1;
 static uint8_t rng_seeded = 0;
-uint8_t reveal_mask = 0x1F;
 static uint8_t reveal_slots[CARD_COUNT];
 static uint8_t reveal_len = 0;
 static uint8_t reveal_index = 0;
 static uint8_t reveal_cooldown = 0;
 static uint8_t reveal_active = 0;
-/* Per-slot one-shot SFX trigger, consumed in render_cards() when slot is drawn. */
-uint8_t reveal_sfx_pending_mask = 0;
 /* Deferred game-over transition to splash/reset, executed safely in update(). */
 uint8_t pending_bankrupt_reset = 0;
-/* Music availability flags and current playback mode. */
-uint8_t splash_music_ready = 0;
-uint8_t game_music_ready = 0;
-uint8_t current_music_mode = 0; /* 0=off, 1=splash, 2=game */
-uint8_t loaded_music_index = 0xFF;
-/* Gameplay audio mode toggle (P):
- * 0 = music-only (card SFX muted)
- * 1 = card-SFX-only (gameplay track paused)
- */
-uint8_t game_cards_sfx_mode = 0;
 /* Reusable static scratch buffers to avoid stack-heavy local arrays on SDCC. */
 uint16_t scratch_gid_grid[SRC_CARD_H][SRC_CARD_W];
 static uint8_t draw_hand_cards_buf[CARD_COUNT];
@@ -91,28 +77,6 @@ char hud_num_buf[6];
 /* Shared card-component GID scratch list for init preload path. */
 static uint16_t component_gids_buf[CARD_SHARED_TILE_CAPACITY];
 
-/* Tracker storage (same pattern used in zeal-bricked). */
-static pattern_t music_pattern0;
-static pattern_t music_pattern1;
-static pattern_t music_pattern2;
-static pattern_t music_pattern3;
-static pattern_t music_pattern4;
-static pattern_t music_pattern5;
-static pattern_t music_pattern6;
-static pattern_t music_pattern7;
-track_t music_track = {
-    .title = "Music",
-    .patterns = {
-        &music_pattern0,
-        &music_pattern1,
-        &music_pattern2,
-        &music_pattern3,
-        &music_pattern4,
-        &music_pattern5,
-        &music_pattern6,
-        &music_pattern7,
-    }
-};
 
 /* Snapshot of key events for one update tick. */
 typedef struct {
@@ -129,10 +93,6 @@ typedef struct {
 static uint8_t suppress_enter_ticks = 0;
 /* Requires Enter/Space release before accepting next confirm action. */
 static uint8_t confirm_armed = 0;
-/* Per-slot render invalidation mask for incremental redraws. */
-uint8_t dirty_slots[CARD_COUNT];
-/* Forces one pass over all slots (startup/phase reset). */
-uint8_t full_redraw = 1;
 
 /* Map GID -> runtime tile ID remap generated from layout_map.h usage. */
 uint16_t mapped_gids[MAP_TILE_CAPACITY];
@@ -165,17 +125,17 @@ const uint8_t credit_x = 35;
 const uint8_t credit_y = 17;
 
 /* Critical source GIDs used outside TMX map rendering. */
-static const uint16_t kHoldFrameSourceGid = 105;
-static const uint16_t kDigitGidBase = 165;
-static const uint16_t kAlphaAGidBase = 175;
-static const uint16_t kAlphaNGidBase = 188;
-static const uint16_t kColonGid = 201;
-static const uint16_t kExclGid = 202;
+static const uint16_t kHoldFrameSourceGid = 120;
+static const uint16_t kDigitGidBase = 153;
+static const uint16_t kAlphaAGidBase = 163;
+static const uint16_t kAlphaNGidBase = 176;
+static const uint16_t kColonGid = 189;
+static const uint16_t kExclGid = 190;
 /* Splash border fiche 2x2 source GIDs (+1 from Tiled local tile IDs). */
-static const uint16_t kSplashChipTL = 106; /* Tiled ID 105 */
-static const uint16_t kSplashChipTR = 107; /* Tiled ID 106 */
-static const uint16_t kSplashChipBL = 147; /* Tiled ID 146 */
-static const uint16_t kSplashChipBR = 148; /* Tiled ID 147 */
+static const uint16_t kSplashChipTL = 100; /* Tiled ID 99 */
+static const uint16_t kSplashChipTR = 101; /* Tiled ID 100 */
+static const uint16_t kSplashChipBL = 138; /* Tiled ID 137 */
+static const uint16_t kSplashChipBR = 139; /* Tiled ID 138 */
 /* Splash text content and placement. */
 static const char kSplashTitle[] = "ZEAL VIDEO POKER";
 static const char kSplashPrompt[] = "PRESS ENTER TO PLAY!";
@@ -188,8 +148,6 @@ static void reseed_rng_for_new_hand(void);
 static void start_reveal_sequence(const uint8_t* slots, uint8_t len, uint8_t initial_mask);
 static void update_reveal_sequence(void);
 static void set_win_banner_from_result(const HandResult* result);
-static void mark_all_slots_dirty(void);
-static void mark_slot_dirty(uint8_t slot);
 static void perform_bankrupt_reset_with_splash(void);
 static void clamp_bet_to_credits(void);
 #if ZP_VALIDATE
@@ -564,22 +522,6 @@ static void render_splash_screen(void)
     draw_splash_border();
 }
 
-static void mark_all_slots_dirty(void)
-{
-    /* Used when phase/layout changes can affect all card slots at once. */
-    for (uint8_t i = 0; i < CARD_COUNT; i++) {
-        dirty_slots[i] = 1;
-    }
-    full_redraw = 1;
-}
-
-static void mark_slot_dirty(uint8_t slot)
-{
-    if (slot < CARD_COUNT) {
-        dirty_slots[slot] = 1;
-    }
-}
-
 static void set_win_banner_from_result(const HandResult* result)
 {
     const char* combo = NULL;
@@ -610,7 +552,7 @@ void deal_hand(void)
     for (uint8_t i = 0; i < CARD_COUNT; i++) {
         cards[i].card = pop_deck();
         cards[i].held = false;
-        mark_slot_dirty(i);
+        render_mark_slot_dirty(i);
     }
 
     show_card_faces = 1;
@@ -630,7 +572,7 @@ void draw_hand(void)
         if (!cards[i].held) {
             cards[i].card = pop_deck();
             draw_hand_slots_buf[slot_count++] = i;
-            mark_slot_dirty(i);
+            render_mark_slot_dirty(i);
         } else {
             keep_mask |= (uint8_t)(1U << i);
         }
@@ -728,15 +670,11 @@ static void reseed_rng_for_new_hand(void)
 
 static void start_reveal_sequence(const uint8_t* slots, uint8_t len, uint8_t initial_mask)
 {
-    reveal_mask = initial_mask;
+    render_begin_reveal(initial_mask);
     reveal_len = (len > CARD_COUNT) ? CARD_COUNT : len;
     reveal_index = 0;
     reveal_cooldown = 0;
     reveal_active = (reveal_len > 0);
-    reveal_sfx_pending_mask = 0;
-
-    /* Visibility masks changed; redraw card region conservatively. */
-    mark_all_slots_dirty();
 
     for (uint8_t i = 0; i < reveal_len; i++) {
         reveal_slots[i] = slots[i];
@@ -755,11 +693,7 @@ static void update_reveal_sequence(void)
     }
 
     uint8_t slot = reveal_slots[reveal_index];
-    reveal_mask |= (uint8_t)(1U << slot);
-    /* Reveal animation updates one slot at a time. */
-    mark_slot_dirty(slot);
-    /* Defer SFX until render pass actually places this card on screen. */
-    reveal_sfx_pending_mask |= (uint8_t)(1U << slot);
+    render_reveal_slot(slot, 1);
 
     reveal_index++;
     needs_redraw = 1;
@@ -822,7 +756,6 @@ static void perform_bankrupt_reset_with_splash(void)
     show_win_banner = 0;
     show_card_faces = 0;
     reveal_active = 0;
-    reveal_mask = 0;
     start_reveal_sequence(all_slots, CARD_COUNT, 0);
     suppress_enter_ticks = 8;
     confirm_armed = 0;
@@ -845,7 +778,6 @@ static void return_to_bet_phase(void)
     show_win_banner = 0;
     show_card_faces = 0;
     reveal_active = 0;
-    reveal_mask = 0;
     start_reveal_sequence(all_slots, CARD_COUNT, 0);
     state = STATE_BET;
     clamp_bet_to_credits();
@@ -930,29 +862,7 @@ void init(void)
     }
 
     sound_init();
-    if (load_zmt(&music_track, 0) == ERR_SUCCESS) {
-        splash_music_ready = 1;
-        loaded_music_index = 0;
-    } else {
-        splash_music_ready = 0;
-        printf("Warning: failed to load splash music track\n");
-    }
-    if (load_zmt(&music_track, 1) == ERR_SUCCESS) {
-        game_music_ready = 1;
-        loaded_music_index = 1;
-    } else {
-        game_music_ready = 0;
-        printf("Warning: failed to load gameplay music track\n");
-    }
-    if (splash_music_ready) {
-        /* Ensure splash music is staged for first screen. */
-        if (load_zmt(&music_track, 0) == ERR_SUCCESS) {
-            loaded_music_index = 0;
-        } else {
-            splash_music_ready = 0;
-            loaded_music_index = 0xFF;
-        }
-    }
+    audio_init_tracks();
 
     init_layout_tiles();
     if (!ensure_map_gid_loaded(kSplashChipTL) ||
@@ -1048,8 +958,7 @@ void update(void)
     }
 
     if (ev.toggle_audio_mode) {
-        game_cards_sfx_mode ^= 1;
-        apply_game_audio_mode();
+        audio_toggle_game_audio_mode();
     }
 
     if (state == STATE_HOLD) {
@@ -1115,9 +1024,7 @@ void draw(void)
         needs_redraw = 0;
         needs_hud_redraw = 0;
     } else if (needs_hud_redraw) {
-        draw_hud_values();
-        draw_hold_frames();
-        draw_hold_labels();
+        render_refresh_overlays();
         needs_hud_redraw = 0;
     }
 }

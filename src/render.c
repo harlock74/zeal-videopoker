@@ -12,6 +12,12 @@
 #include "audio.h"
 #include "render.h"
 
+/* Render/reveal internals owned by this module. */
+static uint8_t reveal_mask = 0x1F;
+static uint8_t reveal_sfx_pending_mask = 0;
+static uint8_t dirty_slots[CARD_COUNT];
+static uint8_t full_redraw = 1;
+
 /* Restore one map cell from original TMX layout (used to erase overlays). */
 static void restore_map_cell(uint8_t x, uint8_t y)
 {
@@ -203,10 +209,52 @@ void draw_hud_values(void)
     nprint_string(&vctx, hud_num_buf, 3, credit_x, credit_y);
 }
 
+void render_mark_all_slots_dirty(void)
+{
+    for (uint8_t i = 0; i < CARD_COUNT; i++) {
+        dirty_slots[i] = 1;
+    }
+    full_redraw = 1;
+}
+
+void render_mark_slot_dirty(uint8_t slot)
+{
+    if (slot < CARD_COUNT) {
+        dirty_slots[slot] = 1;
+    }
+}
+
+void render_begin_reveal(uint8_t initial_mask)
+{
+    reveal_mask = initial_mask;
+    reveal_sfx_pending_mask = 0;
+    /* Mask changes can affect all visible slots. */
+    render_mark_all_slots_dirty();
+}
+
+void render_reveal_slot(uint8_t slot, uint8_t queue_sfx)
+{
+    if (slot >= CARD_COUNT) {
+        return;
+    }
+    reveal_mask |= (uint8_t)(1U << slot);
+    render_mark_slot_dirty(slot);
+    if (queue_sfx) {
+        reveal_sfx_pending_mask |= (uint8_t)(1U << slot);
+    }
+}
+
 void render_table(void)
 {
     /* Static background render (called once at init). */
     render_layout();
+}
+
+void render_refresh_overlays(void)
+{
+    draw_hud_values();
+    draw_hold_frames();
+    draw_hold_labels();
 }
 
 void render_cards(void)
@@ -237,7 +285,5 @@ void render_cards(void)
     full_redraw = 0;
 
     /* Dynamic overlays are redrawn every time cards/HUD state changes. */
-    draw_hold_frames();
-    draw_hold_labels();
-    draw_hud_values();
+    render_refresh_overlays();
 }
