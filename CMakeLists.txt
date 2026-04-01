@@ -42,7 +42,11 @@ find_package(ZGDK REQUIRED)
 target_link_libraries(zpoker PUBLIC zgdk)
 
 gif2zeal(zpoker FILES
-    "assets/cards.gif")
+    "assets/cards.gif"
+    BIT 4
+    COLORS 16
+    COMPRESSED
+)
 
 add_asset(zpoker FILES
     "assets/splash.zmt"
