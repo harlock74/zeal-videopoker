@@ -21,14 +21,11 @@
 #define SRC_CARD_H 4
 #define SHARED_SCRATCH_BUF_SIZE 320
 
-/*
- * Direct tileset IDs (runtime tile = source GID - 1).
- * These values correspond to cards.gif current font/overlay layout.
- */
+/* Direct tileset IDs from cards.gif current font/overlay layout. */
 #define FONT_DIGIT_TILE 152
 #define FONT_ALPHA_A_TILE 162
 #define FONT_ALPHA_N_TILE 175
-/* Blank tile (GID 4 -> runtime tile 3) used as layer1 clear/space tile. */
+/* Blank tile used as layer1 clear/space tile. */
 #define FONT_SPACE_TILE 3
 #define FONT_COLON_TILE 188
 #define FONT_EXCL_TILE 189

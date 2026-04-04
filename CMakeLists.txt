@@ -32,7 +32,6 @@ add_executable(${target_name}
     src/gameplay.c
     src/render.c
     src/assets.c
-    src/layout_map.c
 )
 # prevent linking against stdlib
 target_compile_options(${target_name} PRIVATE
@@ -51,6 +50,11 @@ gif2zeal(${target_name} FILES
     COMPRESSED
 )
 
+tiled2zeal(${target_name} FILES
+    "assets/cards.tmx"
+    LAYER 0
+)
+
 add_asset(${target_name} FILES
     "assets/splash.zmt"
     "assets/music.zmt"
@@ -59,25 +63,9 @@ add_asset(${target_name} FILES
 copy_assets(${target_name} FILES
     "assets/cards.zts"
     "assets/cards.ztp"
+    "assets/cards.ztm"
     "assets/splash.zmt"
     "assets/music.zmt"
 )
 
 zgdk_add_outputs(${target_name})
-
-find_package(Python3 REQUIRED COMPONENTS Interpreter)
-
-add_custom_target(generate_layout_map
-    COMMAND ${Python3_EXECUTABLE}
-        ${CMAKE_CURRENT_SOURCE_DIR}/tools/generate_layout_map.py
-        --tmx ${CMAKE_CURRENT_SOURCE_DIR}/assets/cards.tmx
-        --out-header ${CMAKE_CURRENT_SOURCE_DIR}/src/layout_map.h
-        --out-source ${CMAKE_CURRENT_SOURCE_DIR}/src/layout_map.c
-    DEPENDS
-        ${CMAKE_CURRENT_SOURCE_DIR}/assets/cards.tmx
-        ${CMAKE_CURRENT_SOURCE_DIR}/tools/generate_layout_map.py
-    COMMENT "Generating src/layout_map.h and src/layout_map.c from assets/cards.tmx"
-    VERBATIM
-)
-
-add_dependencies(${target_name} generate_layout_map)

@@ -4,7 +4,6 @@
 #include <zgdk.h>
 #include <core.h>
 
-#include "layout_map.h"
 #include "main.h"
 #include "app_state.h"
 #include "assets.h"
@@ -61,23 +60,19 @@ void draw_hold_frames(void)
 
 static void render_layout(void)
 {
-    /* Paint the full static background UI from TMX-derived GID data. */
-    for (uint8_t y = 0; y < LAYOUT_H; y++) {
-        for (uint8_t x = 0; x < LAYOUT_W; x++) {
-            uint16_t gid = kLayoutGids[(y * LAYOUT_W) + x];
-            uint8_t tile = map_gid_to_tile(gid);
-            gfx_tilemap_place(&vctx, tile, TILEMAP_LAYER, x, y);
+    /* Paint the full static background UI from tiled2zeal-generated map data. */
+    for (uint8_t y = 0; y < SCREEN_TILE_H; y++) {
+        for (uint8_t x = 0; x < SCREEN_TILE_W; x++) {
+            gfx_tilemap_place(&vctx, assets_get_layout_tile(x, y), TILEMAP_LAYER, x, y);
         }
     }
 }
 
-void place_gid_grid_at(uint8_t x0, uint8_t y0, const uint16_t grid[SRC_CARD_H][SRC_CARD_W])
+void place_tile_grid_at(uint8_t x0, uint8_t y0, const uint8_t grid[SRC_CARD_H][SRC_CARD_W])
 {
     for (uint8_t row = 0; row < SRC_CARD_H; row++) {
         for (uint8_t col = 0; col < SRC_CARD_W; col++) {
-            uint16_t gid = grid[row][col];
-            uint8_t tile = map_card_gid_to_tile(gid);
-            gfx_tilemap_place(&vctx, tile, CARD_LAYER, (uint8_t)(x0 + col), (uint8_t)(y0 + row));
+            gfx_tilemap_place(&vctx, grid[row][col], CARD_LAYER, (uint8_t)(x0 + col), (uint8_t)(y0 + row));
         }
     }
 }
@@ -85,11 +80,11 @@ void place_gid_grid_at(uint8_t x0, uint8_t y0, const uint16_t grid[SRC_CARD_H][S
 static void draw_card_slot_direct(uint8_t slot, uint8_t show_face, uint8_t card)
 {
     if (show_face) {
-        assets_build_card_gid_grid(scratch_gid_grid, card);
+        assets_build_card_tile_grid(scratch_tile_grid, card);
     } else {
-        assets_build_back_gid_grid(scratch_gid_grid);
+        assets_build_back_tile_grid(scratch_tile_grid);
     }
-    place_gid_grid_at(slot_x[slot], slot_y, scratch_gid_grid);
+    place_tile_grid_at(slot_x[slot], slot_y, scratch_tile_grid);
 }
 
 static void clear_card_slot(uint8_t slot)

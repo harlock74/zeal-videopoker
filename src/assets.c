@@ -13,6 +13,8 @@ extern uint8_t _zmt_track1_start;
 extern uint8_t _zmt_track1_end;
 extern uint8_t _zmt_track2_start;
 extern uint8_t _zmt_track2_end;
+extern uint8_t _ztm_cards_start;
+extern uint8_t _ztm_cards_end;
 
 #define ASSET_IO_CHUNK 128
 #define CARD_TILE_W 3
@@ -34,19 +36,19 @@ enum {
 };
 
 typedef struct {
-    uint16_t top;
-    uint16_t mid;
-    uint16_t bottom;
+    uint8_t top;
+    uint8_t mid;
+    uint8_t bottom;
 } FaceColumn;
 
 typedef struct {
-    uint16_t top;
-    uint16_t mid_left;
-    uint16_t mid_center;
-    uint16_t mid_right;
-    uint16_t bottom_left;
-    uint16_t bottom_center;
-    uint16_t bottom_right;
+    uint8_t top;
+    uint8_t mid_left;
+    uint8_t mid_center;
+    uint8_t mid_right;
+    uint8_t bottom_left;
+    uint8_t bottom_center;
+    uint8_t bottom_right;
 } QueenFace;
 
 /*
@@ -70,14 +72,14 @@ typedef enum {
 
 #define POS_BIT(pos) ((uint16_t)(1U << (pos)))
 
-/* Core card composition GIDs from cards.gif. */
-static const uint16_t kWhiteCardTileGid = 12;
+/* Core card composition tile IDs from cards.gif. */
+static const uint8_t kWhiteCardTile = 11;
 
-static const uint16_t kSuitGidBySuit[CARD_SUIT_COUNT] = {
-    1,   /* Hearts */
-    39,  /* Diamonds */
-    115, /* Spades */
-    77   /* Clubs */
+static const uint8_t kSuitTileBySuit[CARD_SUIT_COUNT] = {
+    0,   /* Hearts */
+    38,  /* Diamonds */
+    114, /* Spades */
+    76   /* Clubs */
 };
 
 /* Explicit suit->color mapping to avoid implicit dependency on suit ordering. */
@@ -88,37 +90,37 @@ static const uint8_t kSuitColorBySuit[CARD_SUIT_COUNT] = {
     COLOR_BLACK, /* Clubs */
 };
 
-static const uint16_t kRankGlyphRed[CARD_RANK_COUNT] = {
-    13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25
+static const uint8_t kRankGlyphRed[CARD_RANK_COUNT] = {
+    12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24
 };
 
-static const uint16_t kRankGlyphBlack[CARD_RANK_COUNT] = {
-    51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63
+static const uint8_t kRankGlyphBlack[CARD_RANK_COUNT] = {
+    50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62
 };
 
 /* J and K are center-column portraits (top/mid/bottom) with red/black variants. */
 static const FaceColumn kJackFaceByColor[2] = {
-    {2, 40, 78},  /* Red J */
-    {3, 41, 79},  /* Black J */
+    {1, 39, 77},  /* Red J */
+    {2, 40, 78},  /* Black J */
 };
 
 static const FaceColumn kKingFaceByColor[2] = {
-    {10, 48, 86}, /* Red K */
-    {11, 49, 87}, /* Black K */
+    {9, 47, 85},  /* Red K */
+    {10, 48, 86}, /* Black K */
 };
 
 /* Q uses wider portrait fragments. */
 static const QueenFace kQueenFaceByColor[2] = {
-    {5, 42, 43, 44, 80, 81, 82}, /* Red Q */
-    {8, 45, 46, 47, 83, 84, 85}, /* Black Q */
+    {4, 41, 42, 43, 79, 80, 81}, /* Red Q */
+    {7, 44, 45, 46, 82, 83, 84}, /* Black Q */
 };
 
 /* Fixed 3x4 red-back card layout from cards.gif/cards.tmx. */
-static const uint16_t kBackCardGids[CARD_TILE_H][CARD_TILE_W] = {
-    {116, 117, 118},
-    {119, 120, 121},
-    {122, 123, 124},
-    {125, 126, 127},
+static const uint8_t kBackCardTiles[CARD_TILE_H][CARD_TILE_W] = {
+    {115, 116, 117},
+    {118, 119, 120},
+    {121, 122, 123},
+    {124, 125, 126},
 };
 
 gfx_error load_cards_palette(gfx_context* ctx)
@@ -246,74 +248,23 @@ gfx_error load_cards_tileset(gfx_context* ctx)
     return GFX_SUCCESS;
 }
 
-static uint8_t validate_gid_range_local(uint16_t gid, uint16_t max_gid, const char* label)
-{
-    if (gid == 0 || gid > max_gid) {
-        put_s("Card table validation failed: ");
-        put_s(label);
-        put_s(" GID ");
-        put_u16(gid);
-        put_s(" out of 1..");
-        put_u16(max_gid);
-        put_c('\n');
-        return 0;
-    }
-    return 1;
-}
-
-gfx_error assets_validate_card_tables(uint16_t max_gid)
-{
-    uint8_t ok = 1;
-
-    ok &= validate_gid_range_local(kWhiteCardTileGid, max_gid, "white_bg");
-
-    for (uint8_t i = 0; i < CARD_SUIT_COUNT; i++) {
-        ok &= validate_gid_range_local(kSuitGidBySuit[i], max_gid, "suit_gid");
-    }
-
-    for (uint8_t i = 0; i < CARD_RANK_COUNT; i++) {
-        ok &= validate_gid_range_local(kRankGlyphRed[i], max_gid, "rank_red");
-        ok &= validate_gid_range_local(kRankGlyphBlack[i], max_gid, "rank_black");
-    }
-
-    for (uint8_t c = 0; c < 2; c++) {
-        ok &= validate_gid_range_local(kJackFaceByColor[c].top, max_gid, "jack_top");
-        ok &= validate_gid_range_local(kJackFaceByColor[c].mid, max_gid, "jack_mid");
-        ok &= validate_gid_range_local(kJackFaceByColor[c].bottom, max_gid, "jack_bottom");
-
-        ok &= validate_gid_range_local(kKingFaceByColor[c].top, max_gid, "king_top");
-        ok &= validate_gid_range_local(kKingFaceByColor[c].mid, max_gid, "king_mid");
-        ok &= validate_gid_range_local(kKingFaceByColor[c].bottom, max_gid, "king_bottom");
-
-        ok &= validate_gid_range_local(kQueenFaceByColor[c].top, max_gid, "queen_top");
-        ok &= validate_gid_range_local(kQueenFaceByColor[c].mid_left, max_gid, "queen_mid_l");
-        ok &= validate_gid_range_local(kQueenFaceByColor[c].mid_center, max_gid, "queen_mid_c");
-        ok &= validate_gid_range_local(kQueenFaceByColor[c].mid_right, max_gid, "queen_mid_r");
-        ok &= validate_gid_range_local(kQueenFaceByColor[c].bottom_left, max_gid, "queen_bot_l");
-        ok &= validate_gid_range_local(kQueenFaceByColor[c].bottom_center, max_gid, "queen_bot_c");
-        ok &= validate_gid_range_local(kQueenFaceByColor[c].bottom_right, max_gid, "queen_bot_r");
-    }
-
-    return ok ? GFX_SUCCESS : GFX_FAILURE;
-}
-
-static void init_card_grid(uint16_t grid[CARD_TILE_H][CARD_TILE_W], uint16_t gid)
+static void init_card_grid(uint8_t grid[CARD_TILE_H][CARD_TILE_W], uint8_t tile)
 {
     for (uint8_t r = 0; r < CARD_TILE_H; r++) {
         for (uint8_t c = 0; c < CARD_TILE_W; c++) {
-            grid[r][c] = gid;
+            grid[r][c] = tile;
         }
     }
 }
 
-static void set_card_pos(uint16_t grid[CARD_TILE_H][CARD_TILE_W], CardPos pos, uint16_t gid)
+static void set_card_pos(uint8_t grid[CARD_TILE_H][CARD_TILE_W], CardPos pos, uint8_t tile)
 {
     uint8_t row = (uint8_t)pos / CARD_TILE_W;
     uint8_t col = (uint8_t)pos % CARD_TILE_W;
-    grid[row][col] = gid;
+    grid[row][col] = tile;
 }
 
-static void set_pips_for_rank(uint16_t grid[CARD_TILE_H][CARD_TILE_W], uint8_t rank, uint16_t suit_gid)
+static void set_pips_for_rank(uint8_t grid[CARD_TILE_H][CARD_TILE_W], uint8_t rank, uint8_t suit_tile)
 {
     /*
      * Pip layouts for A..10 as 12-bit masks over the 3x4 grid:
@@ -349,22 +300,22 @@ static void set_pips_for_rank(uint16_t grid[CARD_TILE_H][CARD_TILE_W], uint8_t r
         if (mask & (uint16_t)(1U << pos)) {
             row = (uint8_t)(pos / CARD_TILE_W);
             col = (uint8_t)(pos % CARD_TILE_W);
-            grid[row][col] = suit_gid;
+            grid[row][col] = suit_tile;
         }
     }
 }
 
 static void set_face_figure(
-    uint16_t grid[CARD_TILE_H][CARD_TILE_W],
+    uint8_t grid[CARD_TILE_H][CARD_TILE_W],
     uint8_t rank,
     uint8_t black,
-    uint16_t suit_gid)
+    uint8_t suit_tile)
 {
     /*
      * Figure cards (J/Q/K) are assembled from dedicated portrait components.
      * Suit marker must be in row 1, col 0 (left side), matching the template.
      */
-    set_card_pos(grid, MIDDLE1_LEFT, suit_gid);
+    set_card_pos(grid, MIDDLE1_LEFT, suit_tile);
 
     uint8_t color_idx = black ? COLOR_BLACK : COLOR_RED;
 
@@ -390,35 +341,43 @@ static void set_face_figure(
     }
 }
 
-static void build_card_gid_grid_internal(uint16_t grid[CARD_TILE_H][CARD_TILE_W], uint8_t card)
+static void build_card_tile_grid_internal(uint8_t grid[CARD_TILE_H][CARD_TILE_W], uint8_t card)
 {
     uint8_t rank = (uint8_t)(card % 13U);
     uint8_t suit = (uint8_t)((card / 13U) % CARD_SUIT_COUNT);
     uint8_t color = kSuitColorBySuit[suit];
     uint8_t black = (color == COLOR_BLACK);
 
-    init_card_grid(grid, kWhiteCardTileGid);
+    init_card_grid(grid, kWhiteCardTile);
     set_card_pos(grid, TOP_LEFT, black ? kRankGlyphBlack[rank] : kRankGlyphRed[rank]);
 
     if (rank < RANK_JACK) {
-        set_pips_for_rank(grid, rank, kSuitGidBySuit[suit]);
+        set_pips_for_rank(grid, rank, kSuitTileBySuit[suit]);
     } else {
-        set_face_figure(grid, rank, black, kSuitGidBySuit[suit]);
+        set_face_figure(grid, rank, black, kSuitTileBySuit[suit]);
     }
 }
 
-void assets_build_card_gid_grid(uint16_t grid[4][3], uint8_t card)
+void assets_build_card_tile_grid(uint8_t grid[4][3], uint8_t card)
 {
-    build_card_gid_grid_internal(grid, card);
+    build_card_tile_grid_internal(grid, card);
 }
 
-void assets_build_back_gid_grid(uint16_t grid[4][3])
+void assets_build_back_tile_grid(uint8_t grid[4][3])
 {
     for (uint8_t row = 0; row < CARD_TILE_H; row++) {
         for (uint8_t col = 0; col < CARD_TILE_W; col++) {
-            grid[row][col] = kBackCardGids[row][col];
+            grid[row][col] = kBackCardTiles[row][col];
         }
     }
+}
+
+uint8_t assets_get_layout_tile(uint8_t x, uint8_t y)
+{
+    if (x >= SCREEN_TILE_W || y >= SCREEN_TILE_H) {
+        return EMPTY_TILE;
+    }
+    return ((uint8_t*)&_ztm_cards_start)[((uint16_t)y * SCREEN_TILE_W) + x];
 }
 
 zos_err_t load_zmt(track_t* track, uint8_t index)
@@ -450,6 +409,10 @@ zos_err_t load_zmt(track_t* track, uint8_t index)
 void __assets__(void) __naked
 {
     __asm__(
+        "__ztm_cards_start:\n"
+        "    .incbin \"assets/cards.ztm\"\n"
+        "__ztm_cards_end:\n"
+
         "__zmt_track1_start:\n"
         "    .incbin \"assets/splash.zmt\"\n"
         "__zmt_track1_end:\n"

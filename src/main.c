@@ -12,7 +12,6 @@
 #include <core.h>
 
 #include "assets.h"
-#include "layout_map.h"
 #include "main.h"
 #include "audio.h"
 #include "splash.h"
@@ -20,7 +19,6 @@
 #include "render.h"
 
 #define CARD_REVEAL_DELAY 4
-#define CARD_TILESET_MAX_GID 255
 #define LAYOUT_SPACE_SAMPLE_X 2
 #define CONST_STR_LEN(arr) ((uint8_t)(sizeof(arr) - 1U))
 
@@ -58,7 +56,7 @@ static uint8_t reveal_active = 0;
 /* Deferred game-over transition to splash/reset, executed safely in update(). */
 uint8_t pending_bankrupt_reset = 0;
 /* Reusable static scratch buffers to avoid stack-heavy local arrays on SDCC. */
-uint16_t scratch_gid_grid[SRC_CARD_H][SRC_CARD_W];
+uint8_t scratch_tile_grid[SRC_CARD_H][SRC_CARD_W];
 static uint8_t draw_hand_cards_buf[CARD_COUNT];
 static uint8_t draw_hand_slots_buf[CARD_COUNT];
 char hud_num_buf[6];
@@ -97,13 +95,6 @@ const uint8_t win_y = 17;
 const uint8_t credit_x = 35;
 const uint8_t credit_y = 17;
 
-/* Critical source GIDs used outside TMX map rendering. */
-static const uint16_t kDigitGidBase = 153;
-static const uint16_t kAlphaAGidBase = 163;
-static const uint16_t kAlphaNGidBase = 176;
-static const uint16_t kColonGid = 189;
-static const uint16_t kExclGid = 190;
-/* Splash border fiche 2x2 source GIDs (+1 from Tiled local tile IDs). */
 static void restart_if_credit_low(void);
 static void return_to_bet_phase(void);
 static void reseed_rng_for_new_hand(void);
@@ -122,20 +113,6 @@ static void render_splash_screen(void);
 static void poll_keys(KeyEvents* ev);
 static void print_error_u16(const char* prefix, uint16_t value);
 
-/* Translate TMX GID to the runtime tile ID loaded into VRAM. */
-uint8_t map_gid_to_tile(uint16_t gid)
-{
-    if (gid == 0 || gid > CARD_TILESET_MAX_GID) {
-        return EMPTY_TILE;
-    }
-    return (uint8_t)(gid - 1U);
-}
-
-uint8_t map_card_gid_to_tile(uint16_t gid)
-{
-    return map_gid_to_tile(gid);
-}
-
 static void load_ui_font_tiles(void)
 {
     /*
@@ -143,13 +120,13 @@ static void load_ui_font_tiles(void)
      * so clearing text does not leave blue artifacts on splash/game screens.
      */
     ascii_map(' ', 1, EMPTY_TILE);
-    ascii_map('0', 10, map_gid_to_tile(kDigitGidBase));    // 0-9
-    ascii_map('A', 13, map_gid_to_tile(kAlphaAGidBase));   // A-M
-    ascii_map('a', 13, map_gid_to_tile(kAlphaAGidBase));   // A-M
-    ascii_map('N', 13, map_gid_to_tile(kAlphaNGidBase));   // N-Z
-    ascii_map('n', 13, map_gid_to_tile(kAlphaNGidBase));   // N-Z
-    ascii_map(':', 1, map_gid_to_tile(kColonGid));
-    ascii_map('!', 1, map_gid_to_tile(kExclGid));
+    ascii_map('0', 10, FONT_DIGIT_TILE);    // 0-9
+    ascii_map('A', 13, FONT_ALPHA_A_TILE);  // A-M
+    ascii_map('a', 13, FONT_ALPHA_A_TILE);  // A-M
+    ascii_map('N', 13, FONT_ALPHA_N_TILE);  // N-Z
+    ascii_map('n', 13, FONT_ALPHA_N_TILE);  // N-Z
+    ascii_map(':', 1, FONT_COLON_TILE);
+    ascii_map('!', 1, FONT_EXCL_TILE);
 }
 
 static void clear_layer1(void)
@@ -200,10 +177,10 @@ static void draw_splash_chip_block(uint8_t x, uint8_t y, uint8_t chip_tl, uint8_
 
 static void draw_splash_border(void)
 {
-    static const uint16_t kSplashChipTL = 100; /* Tiled ID 99 */
-    static const uint16_t kSplashChipTR = 101; /* Tiled ID 100 */
-    static const uint16_t kSplashChipBL = 138; /* Tiled ID 137 */
-    static const uint16_t kSplashChipBR = 139; /* Tiled ID 138 */
+    static const uint8_t kSplashChipTL = 99;
+    static const uint8_t kSplashChipTR = 100;
+    static const uint8_t kSplashChipBL = 137;
+    static const uint8_t kSplashChipBR = 138;
     const uint8_t border_off_x = 2;
     const uint8_t border_off_y = 2;
     const uint8_t x_first = border_off_x;
@@ -211,19 +188,14 @@ static void draw_splash_border(void)
     const uint8_t x_last = (uint8_t)(SCREEN_TILE_W - border_off_x - 2);
     /* Bottom row is one tile lower than before, as requested. */
     const uint8_t y_last = (uint8_t)(SCREEN_TILE_H - border_off_y - 2);
-    const uint8_t chip_tl = map_gid_to_tile(kSplashChipTL);
-    const uint8_t chip_tr = map_gid_to_tile(kSplashChipTR);
-    const uint8_t chip_bl = map_gid_to_tile(kSplashChipBL);
-    const uint8_t chip_br = map_gid_to_tile(kSplashChipBR);
-
     for (uint8_t x = x_first; x <= x_last; x = (uint8_t)(x + 2)) {
-        draw_splash_chip_block(x, y_first, chip_tl, chip_tr, chip_bl, chip_br);
-        draw_splash_chip_block(x, y_last, chip_tl, chip_tr, chip_bl, chip_br);
+        draw_splash_chip_block(x, y_first, kSplashChipTL, kSplashChipTR, kSplashChipBL, kSplashChipBR);
+        draw_splash_chip_block(x, y_last, kSplashChipTL, kSplashChipTR, kSplashChipBL, kSplashChipBR);
     }
 
     for (uint8_t y = y_first; y <= (uint8_t)(y_last - 2); y = (uint8_t)(y + 2)) {
-        draw_splash_chip_block(x_first, y, chip_tl, chip_tr, chip_bl, chip_br);
-        draw_splash_chip_block(x_last, y, chip_tl, chip_tr, chip_bl, chip_br);
+        draw_splash_chip_block(x_first, y, kSplashChipTL, kSplashChipTR, kSplashChipBL, kSplashChipBR);
+        draw_splash_chip_block(x_last, y, kSplashChipTL, kSplashChipTR, kSplashChipBL, kSplashChipBR);
     }
 }
 
@@ -241,8 +213,7 @@ static void render_splash_screen(void)
     static const uint8_t kTitleY = 10;
     static const char kTitleText[] = "ZEAL VIDEO POKER";
     static const uint8_t kTitleLen = CONST_STR_LEN(kTitleText);
-    uint16_t space_gid = kLayoutGids[(hold_y * LAYOUT_W) + LAYOUT_SPACE_SAMPLE_X];
-    uint8_t bg_tile = map_gid_to_tile(space_gid);
+    uint8_t bg_tile = assets_get_layout_tile(LAYOUT_SPACE_SAMPLE_X, hold_y);
     uint8_t title_x = (uint8_t)((SCREEN_TILE_W - kTitleLen) / 2);
 
     clear_layer1();
@@ -258,8 +229,8 @@ static void render_splash_screen(void)
 
     /* Showcase hand centered in splash screen. */
     for (uint8_t i = 0; i < 5; i++) {
-        assets_build_card_gid_grid(scratch_gid_grid, showcase_cards[i]);
-        place_gid_grid_at(showcase_x[i], showcase_y, scratch_gid_grid);
+        assets_build_card_tile_grid(scratch_tile_grid, showcase_cards[i]);
+        place_tile_grid_at(showcase_x[i], showcase_y, scratch_tile_grid);
     }
 
     /* Draw border last so splash cards/text cannot overwrite chips. */
