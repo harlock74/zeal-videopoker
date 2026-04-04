@@ -1,13 +1,32 @@
 cmake_minimum_required(VERSION 3.16)
 
+set(target_name "zpoker")
+
+set(CMAKE_VERBOSE_MAKEFILE ON)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/bin)
+
+# Ensure the bin directory exists
+file(MAKE_DIRECTORY ${CMAKE_RUNTIME_OUTPUT_DIRECTORY})
+
 set(ZOS_TOOLCHAIN sdcc)
 include($ENV{ZOS_PATH}/cmake/zos_init.cmake)
-set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
 
-project(zpoker C ASM)
+zos_use(zvb)
+find_package(ZVB_SDK REQUIRED)
+
+zos_use(coreutils)
+find_package(COREUTILS REQUIRED)
+
+zos_use(zgdk)
+find_package(ZGDK REQUIRED)
+
+project(${target_name} C ASM)
 option(CONFIG_VALIDATE "Enable startup validation checks" OFF)
 
-add_executable(zpoker
+
+add_executable(${target_name}
     src/main.c
     src/audio.c
     src/splash.c
@@ -15,7 +34,33 @@ add_executable(zpoker
     src/render.c
     src/assets.c
 )
-target_compile_definitions(zpoker PRIVATE CONFIG_VALIDATE=$<BOOL:${CONFIG_VALIDATE}>)
+target_compile_definitions(${target_name} PRIVATE CONFIG_VALIDATE=$<BOOL:${CONFIG_VALIDATE}>)
+
+target_link_libraries(${target_name} PUBLIC zvb_gfx zvb_sound)
+
+target_link_libraries(${target_name} PUBLIC zgdk)
+
+
+gif2zeal(${target_name} FILES
+    "assets/cards.gif"
+    BIT 4
+    COLORS 16
+    COMPRESSED
+)
+
+add_asset(${target_name} FILES
+    "assets/splash.zmt"
+    "assets/music.zmt"
+)
+
+copy_assets(${target_name} FILES
+    "assets/cards.zts"
+    "assets/cards.ztp"
+    "assets/splash.zmt"
+    "assets/music.zmt"
+)
+
+zgdk_add_outputs(${target_name})
 
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
@@ -31,26 +76,4 @@ add_custom_target(generate_layout_map
     VERBATIM
 )
 
-add_dependencies(zpoker generate_layout_map)
-
-zos_use(zvb)
-find_package(ZVB_SDK REQUIRED)
-target_link_libraries(zpoker PUBLIC zvb_gfx zvb_sound)
-
-zos_use(zgdk)
-find_package(ZGDK REQUIRED)
-target_link_libraries(zpoker PUBLIC zgdk)
-
-gif2zeal(zpoker FILES
-    "assets/cards.gif"
-    BIT 4
-    COLORS 16
-    COMPRESSED
-)
-
-add_asset(zpoker FILES
-    "assets/splash.zmt"
-    "assets/music.zmt"
-)
-
-zos_add_outputs(zpoker)
+add_dependencies(${target_name} generate_layout_map)

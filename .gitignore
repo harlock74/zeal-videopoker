@@ -3,5 +3,8 @@ bin/
 build
 debug/
 
+; general
+tmp/
+
 ; generated
 src/layout_map.h
