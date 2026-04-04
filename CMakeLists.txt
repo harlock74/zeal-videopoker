@@ -23,7 +23,6 @@ zos_use(zgdk)
 find_package(ZGDK REQUIRED)
 
 project(${target_name} C ASM)
-option(CONFIG_VALIDATE "Enable startup validation checks" OFF)
 
 
 add_executable(${target_name}
@@ -35,8 +34,6 @@ add_executable(${target_name}
     src/assets.c
     src/layout_map.c
 )
-target_compile_definitions(${target_name} PRIVATE CONFIG_VALIDATE=$<BOOL:${CONFIG_VALIDATE}>)
-
 # prevent linking against stdlib
 target_compile_options(${target_name} PRIVATE
     $<$<COMPILE_LANGUAGE:C>:--nostdlib>

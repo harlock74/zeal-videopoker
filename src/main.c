@@ -19,17 +19,10 @@
 #include "gameplay.h"
 #include "render.h"
 
-#if defined(CONFIG_VALIDATE) && CONFIG_VALIDATE
-#define ZP_VALIDATE 1
-#else
-#define ZP_VALIDATE 0
-#endif
-
 #define CARD_REVEAL_DELAY 4
 #define CARD_TILESET_MAX_GID 255
-#define FONT_DIGIT_COUNT 10
-#define FONT_ALPHA_COUNT 13
 #define LAYOUT_SPACE_SAMPLE_X 2
+#define CONST_STR_LEN(arr) ((uint8_t)(sizeof(arr) - 1U))
 
 /* Global graphics context used by ZVB drawing APIs. */
 gfx_context vctx;
@@ -105,23 +98,12 @@ const uint8_t credit_x = 35;
 const uint8_t credit_y = 17;
 
 /* Critical source GIDs used outside TMX map rendering. */
-static const uint16_t kHoldFrameSourceGid = 120;
 static const uint16_t kDigitGidBase = 153;
 static const uint16_t kAlphaAGidBase = 163;
 static const uint16_t kAlphaNGidBase = 176;
 static const uint16_t kColonGid = 189;
 static const uint16_t kExclGid = 190;
 /* Splash border fiche 2x2 source GIDs (+1 from Tiled local tile IDs). */
-static const uint16_t kSplashChipTL = 100; /* Tiled ID 99 */
-static const uint16_t kSplashChipTR = 101; /* Tiled ID 100 */
-static const uint16_t kSplashChipBL = 138; /* Tiled ID 137 */
-static const uint16_t kSplashChipBR = 139; /* Tiled ID 138 */
-/* Splash text content and placement. */
-static const char kSplashTitle[] = "ZEAL VIDEO POKER";
-static const char kSplashPrompt[] = "PRESS ENTER TO PLAY!";
-static const uint8_t kSplashTitleY = 10;
-static const uint8_t kSplashPromptY = 13;
-
 static void restart_if_credit_low(void);
 static void return_to_bet_phase(void);
 static void reseed_rng_for_new_hand(void);
@@ -130,9 +112,6 @@ static void update_reveal_sequence(void);
 static void set_win_banner_from_result(const HandResult* result);
 static void perform_bankrupt_reset_with_splash(void);
 static void clamp_bet_to_credits(void);
-#if ZP_VALIDATE
-static uint8_t validate_startup_tiles(void);
-#endif
 static void clear_layer0(void);
 static void clear_layer1(void);
 static void clear_layers(void);
@@ -151,56 +130,6 @@ uint8_t map_gid_to_tile(uint16_t gid)
     }
     return (uint8_t)(gid - 1U);
 }
-
-#if ZP_VALIDATE
-static uint8_t validate_gid_range(uint16_t gid, const char* name)
-{
-    if (gid == 0 || gid > CARD_TILESET_MAX_GID) {
-        put_s("Tile self-check failed: ");
-        put_s(name);
-        put_s(" GID ");
-        put_u16(gid);
-        put_s(" out of 1..");
-        put_u16(CARD_TILESET_MAX_GID);
-        put_c('\n');
-        return 0;
-    }
-    return 1;
-}
-
-static uint8_t validate_startup_tiles(void)
-{
-    /*
-     * Early guard against cards.gif/cards.tsx drift.
-     * Validate only critical hardcoded GIDs used by font/back/hold paths.
-     */
-    uint16_t space_gid = kLayoutGids[(hold_y * LAYOUT_W) + LAYOUT_SPACE_SAMPLE_X];
-
-    if (!validate_gid_range(kHoldFrameSourceGid, "hold_frame")) {
-        return 0;
-    }
-    if (!validate_gid_range(space_gid, "space_bg")) {
-        return 0;
-    }
-    if (!validate_gid_range(kColonGid, "font_colon")) {
-        return 0;
-    }
-    if (!validate_gid_range(kExclGid, "font_excl")) {
-        return 0;
-    }
-    if (!validate_gid_range((uint16_t)(kDigitGidBase + (FONT_DIGIT_COUNT - 1)), "font_digit_9")) {
-        return 0;
-    }
-    if (!validate_gid_range((uint16_t)(kAlphaAGidBase + (FONT_ALPHA_COUNT - 1)), "font_alpha_M")) {
-        return 0;
-    }
-    if (!validate_gid_range((uint16_t)(kAlphaNGidBase + (FONT_ALPHA_COUNT - 1)), "font_alpha_Z")) {
-        return 0;
-    }
-
-    return 1;
-}
-#endif
 
 uint8_t map_card_gid_to_tile(uint16_t gid)
 {
@@ -245,54 +174,20 @@ static void clear_layers(void)
     clear_layer1();
 }
 
-static uint8_t splash_char_tile(char c)
-{
-    if (c >= '0' && c <= '9') {
-        return (uint8_t)(FONT_DIGIT_TILE + (c - '0'));
-    }
-    if (c >= 'A' && c <= 'M') {
-        return (uint8_t)(FONT_ALPHA_A_TILE + (c - 'A'));
-    }
-    if (c >= 'N' && c <= 'Z') {
-        return (uint8_t)(FONT_ALPHA_N_TILE + (c - 'N'));
-    }
-    if (c >= 'a' && c <= 'm') {
-        return (uint8_t)(FONT_ALPHA_A_TILE + (c - 'a'));
-    }
-    if (c >= 'n' && c <= 'z') {
-        return (uint8_t)(FONT_ALPHA_N_TILE + (c - 'n'));
-    }
-    if (c == ':') {
-        return FONT_COLON_TILE;
-    }
-    if (c == '!') {
-        return FONT_EXCL_TILE;
-    }
-    return EMPTY_TILE;
-}
-
-static void draw_splash_text_layer0(const char* text, uint8_t x, uint8_t y)
-{
-    uint8_t len = (uint8_t)str_len(text);
-    for (uint8_t i = 0; i < len; i++) {
-        uint8_t tile = splash_char_tile(text[i]);
-        gfx_tilemap_place(&vctx, tile, TILEMAP_LAYER, (uint8_t)(x + i), y);
-    }
-}
-
 static void draw_splash_prompt(uint8_t visible)
 {
-    uint8_t len = (uint8_t)str_len(kSplashPrompt);
-    uint8_t x = (uint8_t)((SCREEN_TILE_W - len) / 2);
+    static const uint8_t kPromptY = 13;
+    static const char kPromptText[] = "PRESS ENTER TO PLAY!";
+    static const char kPromptBlank[] = "                    ";
+    static const uint8_t kPromptLen = CONST_STR_LEN(kPromptText);
+    uint8_t x = (uint8_t)((SCREEN_TILE_W - kPromptLen) / 2);
 
     if (visible) {
-        draw_splash_text_layer0(kSplashPrompt, x, kSplashPromptY);
+        nprint_string(&vctx, kPromptText, kPromptLen, x, kPromptY);
         return;
     }
 
-    for (uint8_t i = 0; i < len; i++) {
-        gfx_tilemap_place(&vctx, EMPTY_TILE, TILEMAP_LAYER, (uint8_t)(x + i), kSplashPromptY);
-    }
+    nprint_string(&vctx, kPromptBlank, kPromptLen, x, kPromptY);
 }
 
 static void draw_splash_chip_block(uint8_t x, uint8_t y, uint8_t chip_tl, uint8_t chip_tr, uint8_t chip_bl, uint8_t chip_br)
@@ -305,6 +200,10 @@ static void draw_splash_chip_block(uint8_t x, uint8_t y, uint8_t chip_tl, uint8_
 
 static void draw_splash_border(void)
 {
+    static const uint16_t kSplashChipTL = 100; /* Tiled ID 99 */
+    static const uint16_t kSplashChipTR = 101; /* Tiled ID 100 */
+    static const uint16_t kSplashChipBL = 138; /* Tiled ID 137 */
+    static const uint16_t kSplashChipBR = 139; /* Tiled ID 138 */
     const uint8_t border_off_x = 2;
     const uint8_t border_off_y = 2;
     const uint8_t x_first = border_off_x;
@@ -339,9 +238,12 @@ static void render_splash_screen(void)
     };
     static const uint8_t showcase_x[5] = {7, 12, 18, 24, 30};
     static const uint8_t showcase_y = 18;
+    static const uint8_t kTitleY = 10;
+    static const char kTitleText[] = "ZEAL VIDEO POKER";
+    static const uint8_t kTitleLen = CONST_STR_LEN(kTitleText);
     uint16_t space_gid = kLayoutGids[(hold_y * LAYOUT_W) + LAYOUT_SPACE_SAMPLE_X];
     uint8_t bg_tile = map_gid_to_tile(space_gid);
-    uint8_t title_x = (uint8_t)((SCREEN_TILE_W - (uint8_t)str_len(kSplashTitle)) / 2);
+    uint8_t title_x = (uint8_t)((SCREEN_TILE_W - kTitleLen) / 2);
 
     clear_layer1();
 
@@ -351,7 +253,7 @@ static void render_splash_screen(void)
         }
     }
 
-    draw_splash_text_layer0(kSplashTitle, title_x, kSplashTitleY);
+    nprint_string(&vctx, kTitleText, kTitleLen, title_x, kTitleY);
     draw_splash_prompt(1);
 
     /* Showcase hand centered in splash screen. */
@@ -718,16 +620,6 @@ void init(void)
         print_error_u16("Tileset load failed: ", err);
         exit(1);
     }
-#if ZP_VALIDATE
-    if (!validate_startup_tiles()) {
-        put_s("Critical tile validation failed. Check cards.gif/cards.tsx/cards.tmx.\n");
-        exit(1);
-    }
-    if (assets_validate_card_tables(CARD_TILESET_MAX_GID) != GFX_SUCCESS) {
-        put_s("Card composition tile validation failed. Check cards.gif tile mappings.\n");
-        exit(1);
-    }
-#endif
     load_ui_font_tiles();
     render_splash_screen();
     gfx_enable_screen(1);
