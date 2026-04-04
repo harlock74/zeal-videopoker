@@ -33,6 +33,7 @@ add_executable(${target_name}
     src/gameplay.c
     src/render.c
     src/assets.c
+    src/layout_map.c
 )
 target_compile_definitions(${target_name} PRIVATE CONFIG_VALIDATE=$<BOOL:${CONFIG_VALIDATE}>)
 
@@ -68,11 +69,12 @@ add_custom_target(generate_layout_map
     COMMAND ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/tools/generate_layout_map.py
         --tmx ${CMAKE_CURRENT_SOURCE_DIR}/assets/cards.tmx
-        --out ${CMAKE_CURRENT_SOURCE_DIR}/src/layout_map.h
+        --out-header ${CMAKE_CURRENT_SOURCE_DIR}/src/layout_map.h
+        --out-source ${CMAKE_CURRENT_SOURCE_DIR}/src/layout_map.c
     DEPENDS
         ${CMAKE_CURRENT_SOURCE_DIR}/assets/cards.tmx
         ${CMAKE_CURRENT_SOURCE_DIR}/tools/generate_layout_map.py
-    COMMENT "Generating src/layout_map.h from assets/cards.tmx"
+    COMMENT "Generating src/layout_map.h and src/layout_map.c from assets/cards.tmx"
     VERBATIM
 )
 

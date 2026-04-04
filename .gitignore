@@ -7,4 +7,4 @@ debug/
 tmp/
 
 ; generated
-src/layout_map.h
+src/layout_map.*
