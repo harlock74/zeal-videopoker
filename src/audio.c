@@ -27,7 +27,7 @@ static pattern_t music_pattern5;
 static pattern_t music_pattern6;
 static pattern_t music_pattern7;
 static track_t music_track = {
-    .title = "Music",
+    .title = {(char)ZMT_INDEX_NONE, '\0'},
     .patterns = {
         &music_pattern0,
         &music_pattern1,
@@ -41,91 +41,48 @@ static track_t music_track = {
 };
 
 /* Audio state owned by this module. */
-static uint8_t splash_music_ready = 0;
-static uint8_t game_music_ready = 0;
-static uint8_t current_music_mode = 0; /* 0=off, 1=splash, 2=game */
-static uint8_t loaded_music_index = 0xFF;
+static uint8_t music_playing = 0; /* 0=stopped, 1=playing */
 /* 0 = music-only (card SFX muted), 1 = card-SFX-only (gameplay track paused). */
 static uint8_t game_cards_sfx_mode = 0;
 
-void audio_init_tracks(void)
-{
-    if (load_zmt(&music_track, 0) == ERR_SUCCESS) {
-        splash_music_ready = 1;
-        loaded_music_index = 0;
-    } else {
-        splash_music_ready = 0;
-        put_s("Warning: failed to load splash music track\n");
-    }
-
-    if (load_zmt(&music_track, 1) == ERR_SUCCESS) {
-        game_music_ready = 1;
-        loaded_music_index = 1;
-    } else {
-        game_music_ready = 0;
-        put_s("Warning: failed to load gameplay music track\n");
-    }
-
-    if (splash_music_ready) {
-        /* Ensure splash music is staged for first screen. */
-        if (load_zmt(&music_track, 0) == ERR_SUCCESS) {
-            loaded_music_index = 0;
-        } else {
-            splash_music_ready = 0;
-            loaded_music_index = 0xFF;
-        }
-    }
-}
-
 void start_splash_music(void)
 {
-    if (!splash_music_ready) {
-        current_music_mode = 0;
-        return;
-    }
-    if (loaded_music_index != 0) {
-        if (load_zmt(&music_track, 0) == ERR_SUCCESS) {
-            loaded_music_index = 0;
-        } else {
-            current_music_mode = 0;
+    /* Stop any currently playing tracker state before switching assets. */
+    zmt_sound_off();
+
+    if ((uint8_t)music_track.title[0] != ZMT_INDEX_SPLASH) {
+        if (load_zmt(&music_track, ZMT_INDEX_SPLASH) != ERR_SUCCESS) {
+            music_playing = 0;
             return;
         }
     }
-    zmt_sound_off();
     zmt_track_reset(&music_track, 1);
-    current_music_mode = 1;
+    music_playing = 1;
 }
 
 void start_game_music(void)
 {
+    /* Stop any currently playing tracker state before switching assets. */
+    zmt_sound_off();
+
     if (game_cards_sfx_mode) {
-        current_music_mode = 0;
+        music_playing = 0;
         return;
     }
-    if (!game_music_ready) {
-        current_music_mode = 0;
-        return;
-    }
-    if (loaded_music_index != 1) {
-        if (load_zmt(&music_track, 1) == ERR_SUCCESS) {
-            loaded_music_index = 1;
-        } else {
-            current_music_mode = 0;
+    if ((uint8_t)music_track.title[0] != ZMT_INDEX_GAME) {
+        if (load_zmt(&music_track, ZMT_INDEX_GAME) != ERR_SUCCESS) {
+            music_playing = 0;
             return;
         }
     }
-    zmt_sound_off();
     zmt_track_reset(&music_track, 1);
-    current_music_mode = 2;
+    music_playing = 1;
 }
 
 void tick_current_music(void)
 {
-    if (current_music_mode == 1 && splash_music_ready) {
-        /* Splash track authored with arrangement flow. */
-        zmt_tick(&music_track, 1);
-    } else if (current_music_mode == 2 && game_music_ready) {
-        /* Gameplay track uses arrangement flow (zmt_tick(..., 1)). */
+    if (music_playing) {
+        /* Active tracker playback (splash or gameplay) uses arrangement flow. */
         zmt_tick(&music_track, 1);
     }
 }
@@ -133,14 +90,14 @@ void tick_current_music(void)
 void stop_current_music(void)
 {
     zmt_sound_off();
-    current_music_mode = 0;
+    music_playing = 0;
 }
 
 static void apply_game_audio_mode(void)
 {
     if (game_cards_sfx_mode) {
         /* Card-SFX-only mode: silence gameplay music. */
-        if (current_music_mode == 2) {
+        if (music_playing && ((uint8_t)music_track.title[0] == ZMT_INDEX_GAME)) {
             stop_current_music();
         }
         /*

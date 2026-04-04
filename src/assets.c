@@ -423,18 +423,28 @@ void assets_build_back_gid_grid(uint16_t grid[4][3])
 
 zos_err_t load_zmt(track_t* track, uint8_t index)
 {
+    zos_err_t err = ERR_INVALID_OFFSET;
+    track->title[0] = (char)ZMT_INDEX_NONE;
+
     zmt_reset(VOL_50);
     switch (index) {
-        case 0: {
+        case ZMT_INDEX_SPLASH: {
             const size_t size = &_zmt_track1_end - &_zmt_track1_start;
-            return zmt_rom_load(track, &_zmt_track1_start, size);
+            err = zmt_rom_load(track, &_zmt_track1_start, size);
         } break;
-        case 1: {
+        case ZMT_INDEX_GAME: {
             const size_t size = &_zmt_track2_end - &_zmt_track2_start;
-            return zmt_rom_load(track, &_zmt_track2_start, size);
+            err = zmt_rom_load(track, &_zmt_track2_start, size);
         } break;
     }
-    return ERR_NOT_A_FILE;
+    if (err == ERR_SUCCESS) {
+        track->title[0] = (char)index;
+    } else {
+        put_s("Warning: Failed to load track: ");
+        put_c((char)index);
+        put_c('\n');
+    }
+    return err;
 }
 
 void __assets__(void) __naked

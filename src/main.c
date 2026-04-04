@@ -613,7 +613,6 @@ void init(void)
     }
 
     sound_init();
-    audio_init_tracks();
 
     err = load_cards_tileset(&vctx);
     if (err != GFX_SUCCESS) {

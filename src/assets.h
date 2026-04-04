@@ -5,6 +5,10 @@
 #include <zvb_gfx.h>
 #include <zgdk/sound/tracker.h>
 
+#define ZMT_INDEX_SPLASH 'a'
+#define ZMT_INDEX_GAME 'b'
+#define ZMT_INDEX_NONE 0xFF
+
 gfx_error load_cards_palette(gfx_context* ctx);
 gfx_error load_cards_tileset(gfx_context* ctx);
 gfx_error assets_validate_card_tables(uint16_t max_gid);

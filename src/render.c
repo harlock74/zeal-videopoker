@@ -103,12 +103,6 @@ static void clear_bottom_row(void)
     clear_overlay_rect(2, hold_y, 36, 1);
 }
 
-// static void clear_hud_field(uint8_t x, uint8_t y, uint8_t width)
-// {
-//     /* Clears one numeric HUD field on overlay layer before printing new value. */
-//     clear_overlay_rect(x, y, width, 1);
-// }
-
 void draw_hold_labels(void)
 {
     static const char hold_text[] = "HOLD";
@@ -156,10 +150,6 @@ void draw_hold_labels(void)
 
 void draw_hud_values(void)
 {
-    // clear_hud_field(bet_x, bet_y, 4);
-    // clear_hud_field(win_x, win_y, 4);
-    // clear_hud_field(credit_x, credit_y, 4);
-
     /* Always print fixed-width 3 digits so HUD text does not jitter. */
     itoa_pad(bet, hud_num_buf, 10, 'A', '0', 3);
     nprint_string(&vctx, hud_num_buf, 3, bet_x, bet_y);
