@@ -1,0 +1,7 @@
+; artifacts
+bin/
+build
+debug/
+
+; generated
+src/layout_map.h
