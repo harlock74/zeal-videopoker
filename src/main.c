@@ -69,6 +69,7 @@ uint16_t scratch_gid_grid[SRC_CARD_H][SRC_CARD_W];
 static uint8_t draw_hand_cards_buf[CARD_COUNT];
 static uint8_t draw_hand_slots_buf[CARD_COUNT];
 char hud_num_buf[6];
+uint8_t g_buf[SHARED_SCRATCH_BUF_SIZE];
 
 /* Snapshot of key events for one update tick. */
 typedef struct {
@@ -354,7 +355,7 @@ static void render_splash_screen(void)
 static void set_win_banner_from_result(const HandResult* result)
 {
     const char* combo = NULL;
-    char multiplier_buf[6];
+
 
     switch (result->multiplier) {
         case 250: combo = "ROYAL FLUSH"; break;
@@ -374,10 +375,10 @@ static void set_win_banner_from_result(const HandResult* result)
         return;
     }
 
-    itoa(result->multiplier, multiplier_buf, 10, 'A');
+    itoa(result->multiplier, g_buf, 10, 'A');
     str_cpy(win_banner_text, combo);
     str_cat(win_banner_text, " X");
-    str_cat(win_banner_text, multiplier_buf);
+    str_cat(win_banner_text, g_buf);
     str_cat(win_banner_text, ": YOU HAVE WON!");
 }
 
@@ -627,13 +628,13 @@ static void poll_keys(KeyEvents* ev)
      * Read all pending keyboard bytes this tick and convert to one-shot events.
      * KB_RELEASED marker is skipped so hold toggles happen on press only.
      */
-    uint8_t buf[32];
+    uint8_t* buf = g_buf;
     uint8_t released = 0;
 
     mem_set(ev, 0, sizeof(*ev));
 
     while (1) {
-        uint16_t size = sizeof(buf);
+        uint16_t size = 8;
         if (read(DEV_STDIN, buf, &size) != ERR_SUCCESS || size == 0) {
             break;
         }
@@ -740,8 +741,6 @@ void deinit(void)
     stop_current_music();
     sound_stop_all();
     sound_deinit();
-    /* Close persistent asset streams opened by assets.c optimization. */
-    assets_shutdown();
     ioctl(DEV_STDOUT, CMD_RESET_SCREEN, NULL);
 }
 

@@ -30,6 +30,7 @@ extern uint16_t entropy;
 
 extern char win_banner_text[36];
 extern char hud_num_buf[6];
+extern uint8_t g_buf[SHARED_SCRATCH_BUF_SIZE];
 
 extern uint16_t scratch_gid_grid[SRC_CARD_H][SRC_CARD_W];
 

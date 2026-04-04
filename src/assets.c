@@ -7,6 +7,7 @@
 #include <core.h>
 
 #include "assets.h"
+#include "app_state.h"
 
 extern uint8_t _zmt_track1_start;
 extern uint8_t _zmt_track1_end;
@@ -122,7 +123,6 @@ static const uint16_t kBackCardGids[CARD_TILE_H][CARD_TILE_W] = {
 
 gfx_error load_cards_palette(gfx_context* ctx)
 {
-    uint8_t buf[ASSET_IO_CHUNK];
     uint8_t from_color = 0;
     zos_dev_t dev = open("assets/cards.ztp", O_RDONLY);
     if (dev < 0) {
@@ -130,8 +130,8 @@ gfx_error load_cards_palette(gfx_context* ctx)
     }
 
     while (1) {
-        uint16_t size = sizeof(buf);
-        if (read(dev, buf, &size) != ERR_SUCCESS) {
+        uint16_t size = sizeof(g_buf);
+        if (read(dev, g_buf, &size) != ERR_SUCCESS) {
             close(dev);
             return GFX_FAILURE;
         }
@@ -139,7 +139,7 @@ gfx_error load_cards_palette(gfx_context* ctx)
             break;
         }
 
-        if (gfx_palette_load(ctx, buf, size, from_color) != GFX_SUCCESS) {
+        if (gfx_palette_load(ctx, g_buf, size, from_color) != GFX_SUCCESS) {
             close(dev);
             return GFX_FAILURE;
         }
@@ -153,11 +153,11 @@ gfx_error load_cards_palette(gfx_context* ctx)
 
 gfx_error load_cards_tileset(gfx_context* ctx)
 {
-    uint8_t inbuf[ASSET_IO_CHUNK];
+    uint8_t* inbuf = &g_buf[0];
     uint16_t in_pos = 0;
     uint16_t in_size = 0;
     uint16_t from_byte = 0;
-    uint8_t decoded[192];
+    uint8_t* decoded = &g_buf[ASSET_IO_CHUNK];
     uint16_t decoded_len = 0;
     uint8_t ctrl;
     uint8_t run;
@@ -244,11 +244,6 @@ gfx_error load_cards_tileset(gfx_context* ctx)
     close(dev);
 #undef READ_NEXT_BYTE
     return GFX_SUCCESS;
-}
-
-void assets_shutdown(void)
-{
-    /* No persistent file handles in direct-load mode. */
 }
 
 static uint8_t validate_gid_range_local(uint16_t gid, uint16_t max_gid, const char* label)

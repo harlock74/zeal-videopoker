@@ -11,4 +11,3 @@ gfx_error assets_validate_card_tables(uint16_t max_gid);
 void assets_build_card_gid_grid(uint16_t grid[4][3], uint8_t card);
 void assets_build_back_gid_grid(uint16_t grid[4][3]);
 zos_err_t load_zmt(track_t* track, uint8_t index);
-void assets_shutdown(void);

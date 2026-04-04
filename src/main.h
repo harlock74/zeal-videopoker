@@ -19,6 +19,7 @@
 
 #define SRC_CARD_W 3
 #define SRC_CARD_H 4
+#define SHARED_SCRATCH_BUF_SIZE 320
 
 /*
  * Direct tileset IDs (runtime tile = source GID - 1).
