@@ -47,7 +47,7 @@ gif2zeal(${target_name} FILES
     "assets/cards.gif"
     BIT 4
     COLORS 16
-    COMPRESSED
+    # COMPRESSED
 )
 
 tiled2zeal(${target_name} FILES
@@ -63,9 +63,6 @@ add_asset(${target_name} FILES
 copy_assets(${target_name} FILES
     "assets/cards.zts"
     "assets/cards.ztp"
-    "assets/cards.ztm"
-    "assets/splash.zmt"
-    "assets/music.zmt"
 )
 
 zgdk_add_outputs(${target_name})

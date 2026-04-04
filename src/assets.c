@@ -16,7 +16,6 @@ extern uint8_t _zmt_track2_end;
 extern uint8_t _ztm_cards_start;
 extern uint8_t _ztm_cards_end;
 
-#define ASSET_IO_CHUNK 128
 #define CARD_TILE_W 3
 #define CARD_TILE_H 4
 #define CARD_TILE_COUNT (CARD_TILE_W * CARD_TILE_H)
@@ -155,96 +154,38 @@ gfx_error load_cards_palette(gfx_context* ctx)
 
 gfx_error load_cards_tileset(gfx_context* ctx)
 {
-    uint8_t* inbuf = &g_buf[0];
-    uint16_t in_pos = 0;
-    uint16_t in_size = 0;
     uint16_t from_byte = 0;
-    uint8_t* decoded = &g_buf[ASSET_IO_CHUNK];
-    uint16_t decoded_len = 0;
-    uint8_t ctrl;
-    uint8_t run;
-    uint8_t value = 0;
     zos_dev_t dev = open("assets/cards.zts", O_RDONLY);
     if (dev < 0) {
         return GFX_FAILURE;
     }
 
-#define READ_NEXT_BYTE(dst) do {                                                \
-        if (in_pos >= in_size) {                                                \
-            in_size = sizeof(inbuf);                                            \
-            if (read(dev, inbuf, &in_size) != ERR_SUCCESS) {                    \
-                close(dev);                                                      \
-                return GFX_FAILURE;                                              \
-            }                                                                    \
-            in_pos = 0;                                                          \
-            if (in_size == 0) {                                                  \
-                close(dev);                                                      \
-                return GFX_FAILURE;                                              \
-            }                                                                    \
-        }                                                                        \
-        (dst) = inbuf[in_pos++];                                                 \
-    } while (0)
-
-    /* Decode RLE(4-bit packed bytes) locally, then upload uncompressed 8-bit tiles. */
+    /* Stream 4-bit packed ZTS chunks and let ZVB decode to 8-bit tiles in VRAM. */
     while (1) {
-        if (in_pos >= in_size) {
-            in_size = sizeof(inbuf);
-            if (read(dev, inbuf, &in_size) != ERR_SUCCESS) {
-                close(dev);
-                return GFX_FAILURE;
-            }
-            in_pos = 0;
-            if (in_size == 0) {
-                break;
-            }
-        }
-
-        ctrl = inbuf[in_pos++];
-        run = (ctrl & 0x80) ? (uint8_t)((ctrl & 0x7F) + 1) : (uint8_t)(ctrl + 1);
-
-        if (ctrl & 0x80) {
-            READ_NEXT_BYTE(value);
-        }
-
-        while (run--) {
-            if (!(ctrl & 0x80)) {
-                READ_NEXT_BYTE(value);
-            }
-
-            if (decoded_len > (uint16_t)(sizeof(decoded) - 2)) {
-                gfx_tileset_options options = {
-                    .compression = TILESET_COMP_NONE,
-                    .from_byte = from_byte,
-                    .pal_offset = 0,
-                    .opacity = 0,
-                };
-                if (gfx_tileset_load(ctx, decoded, decoded_len, &options) != GFX_SUCCESS) {
-                    return GFX_FAILURE;
-                }
-                from_byte = (uint16_t)(from_byte + decoded_len);
-                decoded_len = 0;
-            }
-
-            decoded[decoded_len++] = (uint8_t)(value >> 4);
-            decoded[decoded_len++] = (uint8_t)(value & 0x0F);
-        }
-    }
-
-    if (decoded_len) {
+        uint16_t size = sizeof(g_buf);
         gfx_tileset_options options = {
-            .compression = TILESET_COMP_NONE,
+            .compression = TILESET_COMP_4BIT,
             .from_byte = from_byte,
             .pal_offset = 0,
             .opacity = 0,
         };
-        if (gfx_tileset_load(ctx, decoded, decoded_len, &options) != GFX_SUCCESS) {
+
+        if (read(dev, g_buf, &size) != ERR_SUCCESS) {
             close(dev);
             return GFX_FAILURE;
         }
+        if (size == 0) {
+            break;
+        }
+
+        if (gfx_tileset_load(ctx, g_buf, size, &options) != GFX_SUCCESS) {
+            close(dev);
+            return GFX_FAILURE;
+        }
+        from_byte = (uint16_t)(from_byte + (size * 2U));
     }
 
     close(dev);
-#undef READ_NEXT_BYTE
     return GFX_SUCCESS;
 }
 

@@ -19,7 +19,7 @@
 
 #define SRC_CARD_W 3
 #define SRC_CARD_H 4
-#define SHARED_SCRATCH_BUF_SIZE 320
+#define SHARED_SCRATCH_BUF_SIZE 1024
 
 /* Direct tileset IDs from cards.gif current font/overlay layout. */
 #define FONT_DIGIT_TILE 152
