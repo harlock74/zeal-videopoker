@@ -1,11 +1,10 @@
-#include <stdio.h>
 #include <stdint.h>
-#include <string.h>
 
 #include <zos_errors.h>
 #include <zos_vfs.h>
 #include <zvb_gfx.h>
 #include <zgdk/sound/tracker.h>
+#include <core.h>
 
 #include "assets.h"
 
@@ -121,28 +120,11 @@ static const uint16_t kBackCardGids[CARD_TILE_H][CARD_TILE_W] = {
     {125, 126, 127},
 };
 
-static zos_dev_t open_asset_with_fallback(const char* name)
-{
-    char path[PATH_MAX];
-    zos_dev_t dev;
-
-    sprintf(path, "assets/%s", name);
-    dev = open(path, O_RDONLY);
-    if (dev >= 0) return dev;
-
-    sprintf(path, "/assets/%s", name);
-    dev = open(path, O_RDONLY);
-    if (dev >= 0) return dev;
-
-    sprintf(path, "A:/assets/%s", name);
-    return open(path, O_RDONLY);
-}
-
 gfx_error load_cards_palette(gfx_context* ctx)
 {
     uint8_t buf[ASSET_IO_CHUNK];
     uint8_t from_color = 0;
-    zos_dev_t dev = open_asset_with_fallback("cards.ztp");
+    zos_dev_t dev = open("assets/cards.ztp", O_RDONLY);
     if (dev < 0) {
         return GFX_FAILURE;
     }
@@ -180,7 +162,7 @@ gfx_error load_cards_tileset(gfx_context* ctx)
     uint8_t ctrl;
     uint8_t run;
     uint8_t value = 0;
-    zos_dev_t dev = open_asset_with_fallback("cards.zts");
+    zos_dev_t dev = open("assets/cards.zts", O_RDONLY);
     if (dev < 0) {
         return GFX_FAILURE;
     }
@@ -272,7 +254,13 @@ void assets_shutdown(void)
 static uint8_t validate_gid_range_local(uint16_t gid, uint16_t max_gid, const char* label)
 {
     if (gid == 0 || gid > max_gid) {
-        printf("Card table validation failed: %s GID %u out of 1..%u\n", label, gid, max_gid);
+        put_s("Card table validation failed: ");
+        put_s(label);
+        put_s(" GID ");
+        put_u16(gid);
+        put_s(" out of 1..");
+        put_u16(max_gid);
+        put_c('\n');
         return 0;
     }
     return 1;

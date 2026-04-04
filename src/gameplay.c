@@ -1,7 +1,7 @@
 #include <stdint.h>
-#include <string.h>
 
 #include <zgdk.h>
+#include <core.h>
 
 #include "main.h"
 #include "app_state.h"
@@ -93,8 +93,8 @@ HandResult evaluate_hand(const uint8_t hand[CARD_COUNT])
     uint8_t trips = 0;
     uint8_t quads = 0;
 
-    memset(g_rank_counts, 0, sizeof(g_rank_counts));
-    memset(g_suit_counts, 0, sizeof(g_suit_counts));
+    mem_set(g_rank_counts, 0, sizeof(g_rank_counts));
+    mem_set(g_suit_counts, 0, sizeof(g_suit_counts));
 
     /* Histogram ranks/suits once, then derive all categories from counts. */
     for (uint8_t i = 0; i < CARD_COUNT; i++) {

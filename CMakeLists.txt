@@ -37,8 +37,13 @@ add_executable(${target_name}
 )
 target_compile_definitions(${target_name} PRIVATE CONFIG_VALIDATE=$<BOOL:${CONFIG_VALIDATE}>)
 
-target_link_libraries(${target_name} PUBLIC zvb_gfx zvb_sound)
+# prevent linking against stdlib
+target_compile_options(${target_name} PRIVATE
+    $<$<COMPILE_LANGUAGE:C>:--nostdlib>
+)
 
+target_link_libraries(${target_name} PUBLIC core)
+target_link_libraries(${target_name} PUBLIC zvb_gfx zvb_sound)
 target_link_libraries(${target_name} PUBLIC zgdk)
 
 

@@ -1,9 +1,8 @@
-#include <stdio.h>
-#include <string.h>
 #include <stdint.h>
 
 #include <zvb_gfx.h>
 #include <zgdk.h>
+#include <core.h>
 
 #include "layout_map.h"
 #include "main.h"
@@ -136,7 +135,7 @@ void draw_hold_labels(void)
      */
     if (state != STATE_HOLD) {
         if (show_win_banner) {
-            uint8_t msg_len = (uint8_t)strlen(win_banner_text);
+            uint8_t msg_len = (uint8_t)str_len(win_banner_text);
             uint8_t msg_x = (uint8_t)(2 + ((36 - msg_len) / 2));
             nprint_string(&vctx, win_banner_text, msg_len, msg_x, hold_y);
         } else if (state == STATE_BET || state == STATE_RESULT) {
@@ -169,11 +168,11 @@ void draw_hud_values(void)
     restore_map_cell((uint8_t)(credit_x - 1), credit_y);
 
     /* Always print fixed-width 3 digits so HUD text does not jitter. */
-    sprintf(hud_num_buf, "%03u", bet);
+    itoa_pad(bet, hud_num_buf, 10, 'A', '0', 3);
     nprint_string(&vctx, hud_num_buf, 3, bet_x, bet_y);
-    sprintf(hud_num_buf, "%03u", win_amount);
+    itoa_pad(win_amount, hud_num_buf, 10, 'A', '0', 3);
     nprint_string(&vctx, hud_num_buf, 3, win_x, win_y);
-    sprintf(hud_num_buf, "%03u", credits);
+    itoa_pad(credits, hud_num_buf, 10, 'A', '0', 3);
     nprint_string(&vctx, hud_num_buf, 3, credit_x, credit_y);
 }
 

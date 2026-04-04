@@ -1,9 +1,9 @@
 #include <stdint.h>
-#include <stdio.h>
 
 #include <zvb_sound.h>
 #include <zgdk.h>
 #include <zgdk/sound/tracker.h>
+#include <core.h>
 
 #include "main.h"
 #include "app_state.h"
@@ -55,7 +55,7 @@ void audio_init_tracks(void)
         loaded_music_index = 0;
     } else {
         splash_music_ready = 0;
-        printf("Warning: failed to load splash music track\n");
+        put_s("Warning: failed to load splash music track\n");
     }
 
     if (load_zmt(&music_track, 1) == ERR_SUCCESS) {
@@ -63,7 +63,7 @@ void audio_init_tracks(void)
         loaded_music_index = 1;
     } else {
         game_music_ready = 0;
-        printf("Warning: failed to load gameplay music track\n");
+        put_s("Warning: failed to load gameplay music track\n");
     }
 
     if (splash_music_ready) {

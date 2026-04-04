@@ -1,6 +1,4 @@
-#include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 #include <stdint.h>
 
 #include <zos_sys.h>
@@ -11,6 +9,7 @@
 #include <zvb_gfx.h>
 #include <zvb_sound.h>
 #include <zgdk.h>
+#include <core.h>
 
 #include "assets.h"
 #include "layout_map.h"
@@ -144,6 +143,7 @@ static void draw_splash_chip_block(uint8_t x, uint8_t y, uint8_t chip_tl, uint8_
 static void draw_splash_border(void);
 static void render_splash_screen(void);
 static void poll_keys(KeyEvents* ev);
+static void print_error_u16(const char* prefix, uint16_t value);
 
 /* Translate TMX GID to the runtime tile ID loaded into VRAM. */
 uint8_t map_gid_to_tile(uint16_t gid)
@@ -158,7 +158,13 @@ uint8_t map_gid_to_tile(uint16_t gid)
 static uint8_t validate_gid_range(uint16_t gid, const char* name)
 {
     if (gid == 0 || gid > CARD_TILESET_MAX_GID) {
-        printf("Tile self-check failed: %s GID %u out of 1..%u\n", name, gid, CARD_TILESET_MAX_GID);
+        put_s("Tile self-check failed: ");
+        put_s(name);
+        put_s(" GID ");
+        put_u16(gid);
+        put_s(" out of 1..");
+        put_u16(CARD_TILESET_MAX_GID);
+        put_c('\n');
         return 0;
     }
     return 1;
@@ -253,7 +259,7 @@ static uint8_t splash_char_tile(char c)
 
 static void draw_splash_text_layer0(const char* text, uint8_t x, uint8_t y)
 {
-    uint8_t len = (uint8_t)strlen(text);
+    uint8_t len = (uint8_t)str_len(text);
     for (uint8_t i = 0; i < len; i++) {
         uint8_t tile = splash_char_tile(text[i]);
         gfx_tilemap_place(&vctx, tile, TILEMAP_LAYER, (uint8_t)(x + i), y);
@@ -262,7 +268,7 @@ static void draw_splash_text_layer0(const char* text, uint8_t x, uint8_t y)
 
 static void draw_splash_prompt(uint8_t visible)
 {
-    uint8_t len = (uint8_t)strlen(kSplashPrompt);
+    uint8_t len = (uint8_t)str_len(kSplashPrompt);
     uint8_t x = (uint8_t)((SCREEN_TILE_W - len) / 2);
 
     if (visible) {
@@ -321,7 +327,7 @@ static void render_splash_screen(void)
     static const uint8_t showcase_y = 18;
     uint16_t space_gid = kLayoutGids[(hold_y * LAYOUT_W) + LAYOUT_SPACE_SAMPLE_X];
     uint8_t bg_tile = map_gid_to_tile(space_gid);
-    uint8_t title_x = (uint8_t)((SCREEN_TILE_W - (uint8_t)strlen(kSplashTitle)) / 2);
+    uint8_t title_x = (uint8_t)((SCREEN_TILE_W - (uint8_t)str_len(kSplashTitle)) / 2);
     splash_bg_tile = bg_tile;
 
     clear_overlay_layer1();
@@ -348,6 +354,7 @@ static void render_splash_screen(void)
 static void set_win_banner_from_result(const HandResult* result)
 {
     const char* combo = NULL;
+    char multiplier_buf[6];
 
     switch (result->multiplier) {
         case 250: combo = "ROYAL FLUSH"; break;
@@ -362,11 +369,16 @@ static void set_win_banner_from_result(const HandResult* result)
         default:  combo = NULL; break;
     }
 
-    if (combo != NULL) {
-        sprintf(win_banner_text, "%s X%u: YOU HAVE WON!", combo, result->multiplier);
-    } else {
-        strcpy(win_banner_text, "YOU HAVE WON!");
+    if (combo == NULL) {
+        str_cpy(win_banner_text, "YOU HAVE WON!");
+        return;
     }
+
+    itoa(result->multiplier, multiplier_buf, 10, 'A');
+    str_cpy(win_banner_text, combo);
+    str_cat(win_banner_text, " X");
+    str_cat(win_banner_text, multiplier_buf);
+    str_cat(win_banner_text, ": YOU HAVE WON!");
 }
 
 void deal_hand(void)
@@ -538,7 +550,7 @@ static void restart_if_credit_low(void)
         return;
     }
 
-    strcpy(win_banner_text, "CREDIT OVER! PRESS ENTER TO START!");
+    str_cpy(win_banner_text, "CREDIT OVER! PRESS ENTER TO START!");
     show_win_banner = 1;
     needs_hud_redraw = 1;
     pending_bankrupt_reset = 1;
@@ -618,7 +630,7 @@ static void poll_keys(KeyEvents* ev)
     uint8_t buf[32];
     uint8_t released = 0;
 
-    memset(ev, 0, sizeof(*ev));
+    mem_set(ev, 0, sizeof(*ev));
 
     while (1) {
         uint16_t size = sizeof(buf);
@@ -664,7 +676,7 @@ void init(void)
     /* Initialize input, graphics mode, assets, then block on splash screen. */
     zos_err_t err = input_init(true);
     if (err != ERR_SUCCESS) {
-        printf("Input init failed: %d\n", err);
+        print_error_u16("Input init failed: ", err);
         exit(1);
     }
 
@@ -672,7 +684,7 @@ void init(void)
 
     err = gfx_initialize(ZVB_CTRL_VID_MODE_GFX_640_8BIT, &vctx);
     if (err != ERR_SUCCESS) {
-        printf("GFX init failed: %d\n", err);
+        print_error_u16("GFX init failed: ", err);
         exit(1);
     }
 
@@ -680,7 +692,7 @@ void init(void)
 
     err = load_cards_palette(&vctx);
     if (err != GFX_SUCCESS) {
-        printf("Palette load failed: %d\n", err);
+        print_error_u16("Palette load failed: ", err);
         exit(1);
     }
 
@@ -689,16 +701,16 @@ void init(void)
 
     err = load_cards_tileset(&vctx);
     if (err != GFX_SUCCESS) {
-        printf("Tileset load failed: %d\n", err);
+        print_error_u16("Tileset load failed: ", err);
         exit(1);
     }
 #if ZP_VALIDATE
     if (!validate_startup_tiles()) {
-        printf("Critical tile validation failed. Check cards.gif/cards.tsx/cards.tmx.\n");
+        put_s("Critical tile validation failed. Check cards.gif/cards.tsx/cards.tmx.\n");
         exit(1);
     }
     if (assets_validate_card_tables(CARD_TILESET_MAX_GID) != GFX_SUCCESS) {
-        printf("Card composition tile validation failed. Check cards.gif tile mappings.\n");
+        put_s("Card composition tile validation failed. Check cards.gif tile mappings.\n");
         exit(1);
     }
 #endif
@@ -731,6 +743,13 @@ void deinit(void)
     /* Close persistent asset streams opened by assets.c optimization. */
     assets_shutdown();
     ioctl(DEV_STDOUT, CMD_RESET_SCREEN, NULL);
+}
+
+static void print_error_u16(const char* prefix, uint16_t value)
+{
+    put_s(prefix);
+    put_u16(value);
+    put_c('\n');
 }
 
 void update(void)
