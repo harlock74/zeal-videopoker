@@ -34,7 +34,11 @@
 #define FONT_EXCL_TILE 189
 #define HOLD_FRAME_TILE 119
 
+#define EMPTY_TILE FONT_SPACE_TILE
+
 #define TILEMAP_LAYER 0
+#define UI_LAYER 1
+#define CARD_LAYER 1
 
 typedef enum {
     STATE_BET = 0,

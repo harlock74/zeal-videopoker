@@ -87,11 +87,6 @@ static uint8_t suppress_enter_ticks = 0;
 /* Requires Enter/Space release before accepting next confirm action. */
 static uint8_t confirm_armed = 0;
 
-/* Cached splash background tile (layer 0) for space/fallback characters. */
-static uint8_t splash_bg_tile = FONT_SPACE_TILE;
-/* Layer1 clear tile (transparent/empty). */
-static const uint8_t overlay_empty_tile = FONT_SPACE_TILE;
-
 /* Position of each playable card slot (top-left tile of 3x4 card). */
 const uint8_t slot_x[CARD_COUNT] = {5, 12, 19, 26, 33};
 const uint8_t slot_y = 21;
@@ -138,7 +133,9 @@ static void clamp_bet_to_credits(void);
 #if ZP_VALIDATE
 static uint8_t validate_startup_tiles(void);
 #endif
-static void clear_overlay_layer1(void);
+static void clear_layer0(void);
+static void clear_layer1(void);
+static void clear_layers(void);
 static void draw_splash_prompt(uint8_t visible);
 static void draw_splash_chip_block(uint8_t x, uint8_t y, uint8_t chip_tl, uint8_t chip_tr, uint8_t chip_bl, uint8_t chip_br);
 static void draw_splash_border(void);
@@ -150,7 +147,7 @@ static void print_error_u16(const char* prefix, uint16_t value);
 uint8_t map_gid_to_tile(uint16_t gid)
 {
     if (gid == 0 || gid > CARD_TILESET_MAX_GID) {
-        return FONT_SPACE_TILE;
+        return EMPTY_TILE;
     }
     return (uint8_t)(gid - 1U);
 }
@@ -216,7 +213,7 @@ static void load_ui_font_tiles(void)
      * nprint_string writes to layer 1; use transparent/empty tile for spaces
      * so clearing text does not leave blue artifacts on splash/game screens.
      */
-    ascii_map(' ', 1, overlay_empty_tile);
+    ascii_map(' ', 1, EMPTY_TILE);
     ascii_map('0', 10, map_gid_to_tile(kDigitGidBase));    // 0-9
     ascii_map('A', 13, map_gid_to_tile(kAlphaAGidBase));   // A-M
     ascii_map('a', 13, map_gid_to_tile(kAlphaAGidBase));   // A-M
@@ -226,10 +223,26 @@ static void load_ui_font_tiles(void)
     ascii_map('!', 1, map_gid_to_tile(kExclGid));
 }
 
-static void clear_overlay_layer1(void)
+static void clear_layer1(void)
 {
     /* Clear layer1 (usually has garbage at init / after transitions). */
-    tilemap_fill(&vctx, LAYER1, overlay_empty_tile, 0, 0, SCREEN_TILE_W, SCREEN_TILE_H);
+    tilemap_fill(&vctx, LAYER1, EMPTY_TILE, 0, 0, SCREEN_TILE_W, SCREEN_TILE_H);
+}
+
+static void clear_layer0(void)
+{
+    /* Clear layer0 background during splash/game transitions. */
+    tilemap_fill(&vctx, LAYER0, EMPTY_TILE, 0, 0, SCREEN_TILE_W, SCREEN_TILE_H);
+}
+
+static void clear_layers(void)
+{
+    /*
+     * Splash -> game transition guard:
+     * clear both layers before drawing the game map to avoid stale tiles.
+     */
+    clear_layer0();
+    clear_layer1();
 }
 
 static uint8_t splash_char_tile(char c)
@@ -255,7 +268,7 @@ static uint8_t splash_char_tile(char c)
     if (c == '!') {
         return FONT_EXCL_TILE;
     }
-    return splash_bg_tile;
+    return EMPTY_TILE;
 }
 
 static void draw_splash_text_layer0(const char* text, uint8_t x, uint8_t y)
@@ -278,7 +291,7 @@ static void draw_splash_prompt(uint8_t visible)
     }
 
     for (uint8_t i = 0; i < len; i++) {
-        gfx_tilemap_place(&vctx, splash_bg_tile, TILEMAP_LAYER, (uint8_t)(x + i), kSplashPromptY);
+        gfx_tilemap_place(&vctx, EMPTY_TILE, TILEMAP_LAYER, (uint8_t)(x + i), kSplashPromptY);
     }
 }
 
@@ -329,9 +342,8 @@ static void render_splash_screen(void)
     uint16_t space_gid = kLayoutGids[(hold_y * LAYOUT_W) + LAYOUT_SPACE_SAMPLE_X];
     uint8_t bg_tile = map_gid_to_tile(space_gid);
     uint8_t title_x = (uint8_t)((SCREEN_TILE_W - (uint8_t)str_len(kSplashTitle)) / 2);
-    splash_bg_tile = bg_tile;
 
-    clear_overlay_layer1();
+    clear_layer1();
 
     for (uint8_t y = 0; y < SCREEN_TILE_H; y++) {
         for (uint8_t x = 0; x < SCREEN_TILE_W; x++) {
@@ -583,6 +595,7 @@ static void perform_bankrupt_reset_with_splash(void)
 {
     render_splash_screen();
     splash_run_blocking(draw_splash_prompt);
+    clear_layers();
     render_table();
     start_game_music();
 
@@ -689,7 +702,7 @@ void init(void)
         exit(1);
     }
 
-    clear_overlay_layer1();
+    clear_layer1();
 
     err = load_cards_palette(&vctx);
     if (err != GFX_SUCCESS) {
@@ -721,6 +734,7 @@ void init(void)
     splash_run_blocking(draw_splash_prompt);
     start_game_music();
 
+    clear_layers();
     render_table();
 
     seed_rng_from_time();

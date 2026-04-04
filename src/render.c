@@ -17,11 +17,14 @@ static uint8_t reveal_sfx_pending_mask = 0;
 static uint8_t dirty_slots[CARD_COUNT];
 static uint8_t full_redraw = 1;
 
-/* Restore one map cell from original TMX layout (used to erase overlays). */
-static void restore_map_cell(uint8_t x, uint8_t y)
+static void clear_overlay_cell(uint8_t x, uint8_t y)
 {
-    uint16_t gid = kLayoutGids[(y * LAYOUT_W) + x];
-    gfx_tilemap_place(&vctx, map_gid_to_tile(gid), TILEMAP_LAYER, x, y);
+    gfx_tilemap_place(&vctx, EMPTY_TILE, CARD_LAYER, x, y);
+}
+
+static void clear_overlay_rect(uint8_t x, uint8_t y, uint8_t width, uint8_t height)
+{
+    tilemap_fill(&vctx, CARD_LAYER, EMPTY_TILE, x, y, width, height);
 }
 
 void draw_hold_frames(void)
@@ -36,21 +39,21 @@ void draw_hold_frames(void)
 
         for (uint8_t x = x0; x <= x1; x++) {
             if (show_frame) {
-                gfx_tilemap_place(&vctx, HOLD_FRAME_TILE, TILEMAP_LAYER, x, y0);
-                gfx_tilemap_place(&vctx, HOLD_FRAME_TILE, TILEMAP_LAYER, x, y1);
+                gfx_tilemap_place(&vctx, HOLD_FRAME_TILE, CARD_LAYER, x, y0);
+                gfx_tilemap_place(&vctx, HOLD_FRAME_TILE, CARD_LAYER, x, y1);
             } else {
-                restore_map_cell(x, y0);
-                restore_map_cell(x, y1);
+                clear_overlay_cell(x, y0);
+                clear_overlay_cell(x, y1);
             }
         }
 
         for (uint8_t y = (uint8_t)(y0 + 1); y < y1; y++) {
             if (show_frame) {
-                gfx_tilemap_place(&vctx, HOLD_FRAME_TILE, TILEMAP_LAYER, x0, y);
-                gfx_tilemap_place(&vctx, HOLD_FRAME_TILE, TILEMAP_LAYER, x1, y);
+                gfx_tilemap_place(&vctx, HOLD_FRAME_TILE, CARD_LAYER, x0, y);
+                gfx_tilemap_place(&vctx, HOLD_FRAME_TILE, CARD_LAYER, x1, y);
             } else {
-                restore_map_cell(x0, y);
-                restore_map_cell(x1, y);
+                clear_overlay_cell(x0, y);
+                clear_overlay_cell(x1, y);
             }
         }
     }
@@ -74,7 +77,7 @@ void place_gid_grid_at(uint8_t x0, uint8_t y0, const uint16_t grid[SRC_CARD_H][S
         for (uint8_t col = 0; col < SRC_CARD_W; col++) {
             uint16_t gid = grid[row][col];
             uint8_t tile = map_card_gid_to_tile(gid);
-            gfx_tilemap_place(&vctx, tile, TILEMAP_LAYER, (uint8_t)(x0 + col), (uint8_t)(y0 + row));
+            gfx_tilemap_place(&vctx, tile, CARD_LAYER, (uint8_t)(x0 + col), (uint8_t)(y0 + row));
         }
     }
 }
@@ -91,29 +94,20 @@ static void draw_card_slot_direct(uint8_t slot, uint8_t show_face, uint8_t card)
 
 static void clear_card_slot(uint8_t slot)
 {
-    uint8_t x0 = slot_x[slot];
-    for (uint8_t row = 0; row < SRC_CARD_H; row++) {
-        for (uint8_t col = 0; col < SRC_CARD_W; col++) {
-            restore_map_cell((uint8_t)(x0 + col), (uint8_t)(slot_y + row));
-        }
-    }
+    clear_overlay_rect(slot_x[slot], slot_y, SRC_CARD_W, SRC_CARD_H);
 }
 
 static void clear_bottom_row(void)
 {
-    /* Clears the action banner/hold row on tilemap layer 0. */
-    for (uint8_t x = 2; x < 38; x++) {
-        restore_map_cell(x, hold_y);
-    }
+    /* Clears the action banner/hold row on overlay layer. */
+    clear_overlay_rect(2, hold_y, 36, 1);
 }
 
-static void clear_hud_field(uint8_t x, uint8_t y, uint8_t width)
-{
-    /* Clears one numeric HUD field before printing a new value. */
-    for (uint8_t i = 0; i < width; i++) {
-        restore_map_cell((uint8_t)(x + i), y);
-    }
-}
+// static void clear_hud_field(uint8_t x, uint8_t y, uint8_t width)
+// {
+//     /* Clears one numeric HUD field on overlay layer before printing new value. */
+//     clear_overlay_rect(x, y, width, 1);
+// }
 
 void draw_hold_labels(void)
 {
@@ -162,10 +156,9 @@ void draw_hold_labels(void)
 
 void draw_hud_values(void)
 {
-    clear_hud_field(bet_x, bet_y, 4);
-    clear_hud_field(win_x, win_y, 4);
-    clear_hud_field(credit_x, credit_y, 4);
-    restore_map_cell((uint8_t)(credit_x - 1), credit_y);
+    // clear_hud_field(bet_x, bet_y, 4);
+    // clear_hud_field(win_x, win_y, 4);
+    // clear_hud_field(credit_x, credit_y, 4);
 
     /* Always print fixed-width 3 digits so HUD text does not jitter. */
     itoa_pad(bet, hud_num_buf, 10, 'A', '0', 3);
