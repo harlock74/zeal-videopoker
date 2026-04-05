@@ -121,10 +121,8 @@ static void load_ui_font_tiles(void)
      */
     ascii_map(' ', 1, EMPTY_TILE);
     ascii_map('0', 10, FONT_DIGIT_TILE);    // 0-9
-    ascii_map('A', 13, FONT_ALPHA_A_TILE);  // A-M
-    ascii_map('a', 13, FONT_ALPHA_A_TILE);  // A-M
-    ascii_map('N', 13, FONT_ALPHA_N_TILE);  // N-Z
-    ascii_map('n', 13, FONT_ALPHA_N_TILE);  // N-Z
+    ascii_map('A', 26, FONT_ALPHA_A_TILE);  // A-Z
+    ascii_map('a', 26, FONT_ALPHA_A_TILE);  // A-Z
     ascii_map(':', 1, FONT_COLON_TILE);
     ascii_map('!', 1, FONT_EXCL_TILE);
 }
@@ -169,18 +167,18 @@ static void draw_splash_prompt(uint8_t visible)
 
 static void draw_splash_chip_block(uint8_t x, uint8_t y, uint8_t chip_tl, uint8_t chip_tr, uint8_t chip_bl, uint8_t chip_br)
 {
-    gfx_tilemap_place(&vctx, chip_tl, TILEMAP_LAYER, x, y);
-    gfx_tilemap_place(&vctx, chip_tr, TILEMAP_LAYER, (uint8_t)(x + 1), y);
-    gfx_tilemap_place(&vctx, chip_bl, TILEMAP_LAYER, x, (uint8_t)(y + 1));
-    gfx_tilemap_place(&vctx, chip_br, TILEMAP_LAYER, (uint8_t)(x + 1), (uint8_t)(y + 1));
+    gfx_tilemap_place(&vctx, chip_tl, UI_LAYER, x, y);
+    gfx_tilemap_place(&vctx, chip_tr, UI_LAYER, (uint8_t)(x + 1), y);
+    gfx_tilemap_place(&vctx, chip_bl, UI_LAYER, x, (uint8_t)(y + 1));
+    gfx_tilemap_place(&vctx, chip_br, UI_LAYER, (uint8_t)(x + 1), (uint8_t)(y + 1));
 }
 
 static void draw_splash_border(void)
 {
-    static const uint8_t kSplashChipTL = 99;
-    static const uint8_t kSplashChipTR = 100;
-    static const uint8_t kSplashChipBL = 137;
-    static const uint8_t kSplashChipBR = 138;
+    static const uint8_t kSplashChipTL = 14;
+    static const uint8_t kSplashChipTR = 15;
+    static const uint8_t kSplashChipBL = 30;
+    static const uint8_t kSplashChipBR = 31;
     const uint8_t border_off_x = 2;
     const uint8_t border_off_y = 2;
     const uint8_t x_first = border_off_x;
@@ -213,7 +211,8 @@ static void render_splash_screen(void)
     static const uint8_t kTitleY = 10;
     static const char kTitleText[] = "ZEAL VIDEO POKER";
     static const uint8_t kTitleLen = CONST_STR_LEN(kTitleText);
-    uint8_t bg_tile = assets_get_layout_tile(LAYOUT_SPACE_SAMPLE_X, hold_y);
+    // uint8_t bg_tile = assets_get_layout_tile(LAYOUT_SPACE_SAMPLE_X, hold_y);
+    static const uint8_t bg_tile = 0;
     uint8_t title_x = (uint8_t)((SCREEN_TILE_W - kTitleLen) / 2);
 
     clear_layer1();

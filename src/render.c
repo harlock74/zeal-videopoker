@@ -64,6 +64,7 @@ static void render_layout(void)
     for (uint8_t y = 0; y < SCREEN_TILE_H; y++) {
         for (uint8_t x = 0; x < SCREEN_TILE_W; x++) {
             gfx_tilemap_place(&vctx, assets_get_layout_tile(x, y), TILEMAP_LAYER, x, y);
+            gfx_tilemap_place(&vctx, assets_get_layout_overlay_tile(x, y), UI_LAYER, x, y);
         }
     }
 }

@@ -45,6 +45,7 @@ target_link_libraries(${target_name} PUBLIC zgdk)
 
 gif2zeal(${target_name} FILES
     "assets/cards.gif"
+    STRIP 80 # last 5 rows of 256x256
     BIT 4
     COLORS 16
     # COMPRESSED
@@ -52,7 +53,6 @@ gif2zeal(${target_name} FILES
 
 tiled2zeal(${target_name} FILES
     "assets/cards.tmx"
-    LAYER 0
 )
 
 add_asset(${target_name} FILES

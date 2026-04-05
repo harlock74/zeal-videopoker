@@ -13,8 +13,10 @@ extern uint8_t _zmt_track1_start;
 extern uint8_t _zmt_track1_end;
 extern uint8_t _zmt_track2_start;
 extern uint8_t _zmt_track2_end;
-extern uint8_t _ztm_cards_start;
-extern uint8_t _ztm_cards_end;
+extern uint8_t _ztm_cards0000_start;
+extern uint8_t _ztm_cards0000_end;
+extern uint8_t _ztm_cards0001_start;
+extern uint8_t _ztm_cards0001_end;
 
 #define CARD_TILE_W 3
 #define CARD_TILE_H 4
@@ -72,13 +74,13 @@ typedef enum {
 #define POS_BIT(pos) ((uint16_t)(1U << (pos)))
 
 /* Core card composition tile IDs from cards.gif. */
-static const uint8_t kWhiteCardTile = 11;
+static const uint8_t kWhiteCardTile = 16;
 
 static const uint8_t kSuitTileBySuit[CARD_SUIT_COUNT] = {
-    0,   /* Hearts */
-    38,  /* Diamonds */
-    114, /* Spades */
-    76   /* Clubs */
+    3,   /* Hearts */
+    5,  /* Diamonds */
+    6, /* Spades */
+    8   /* Clubs */
 };
 
 /* Explicit suit->color mapping to avoid implicit dependency on suit ordering. */
@@ -90,36 +92,70 @@ static const uint8_t kSuitColorBySuit[CARD_SUIT_COUNT] = {
 };
 
 static const uint8_t kRankGlyphRed[CARD_RANK_COUNT] = {
-    12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24
+    /* A,2,3,4,5,6,7,8,9,10,J,Q,K */
+    48,49,50,51,52,53,54,55,56,57,58,59,60
 };
 
 static const uint8_t kRankGlyphBlack[CARD_RANK_COUNT] = {
-    50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62
+    /* A,2,3,4,5,6,7,8,9,10,J,Q,K */
+    64,65,66,67,68,69,70,71,72,73,74,75,76
 };
 
 /* J and K are center-column portraits (top/mid/bottom) with red/black variants. */
 static const FaceColumn kJackFaceByColor[2] = {
-    {1, 39, 77},  /* Red J */
-    {2, 40, 78},  /* Black J */
+    {
+        1,   /* top -> MIDDLE1_CENTRE */
+        17,  /* mid -> MIDDLE2_CENTRE */
+        33   /* bottom -> BOTTOM_CENTRE */
+    },       /* Red J */
+    {
+        2,   /* top -> MIDDLE1_CENTRE */
+        18,  /* mid -> MIDDLE2_CENTRE */
+        34   /* bottom -> BOTTOM_CENTRE */
+    },       /* Black J */
 };
 
 static const FaceColumn kKingFaceByColor[2] = {
-    {9, 47, 85},  /* Red K */
-    {10, 48, 86}, /* Black K */
+    {
+        9,   /* top -> MIDDLE1_CENTRE */
+        25,  /* mid -> MIDDLE2_CENTRE */
+        41   /* bottom -> BOTTOM_CENTRE */
+    },       /* Red K */
+    {
+        10,  /* top -> MIDDLE1_CENTRE */
+        26,  /* mid -> MIDDLE2_CENTRE */
+        42   /* bottom -> BOTTOM_CENTRE */
+    },       /* Black K */
 };
 
 /* Q uses wider portrait fragments. */
 static const QueenFace kQueenFaceByColor[2] = {
-    {4, 41, 42, 43, 79, 80, 81}, /* Red Q */
-    {7, 44, 45, 46, 82, 83, 84}, /* Black Q */
+    {
+        4,   /* top -> MIDDLE1_CENTRE */
+        19,  /* mid_left -> MIDDLE2_LEFT */
+        20,  /* mid_center -> MIDDLE2_CENTRE */
+        21,  /* mid_right -> MIDDLE2_RIGHT */
+        35,  /* bottom_left -> BOTTOM_LEFT */
+        36,  /* bottom_center -> BOTTOM_CENTRE */
+        37   /* bottom_right -> BOTTOM_RIGHT */
+    },       /* Red Q */
+    {
+        7,   /* top -> MIDDLE1_CENTRE */
+        22,  /* mid_left -> MIDDLE2_LEFT */
+        23,  /* mid_center -> MIDDLE2_CENTRE */
+        24,  /* mid_right -> MIDDLE2_RIGHT */
+        38,  /* bottom_left -> BOTTOM_LEFT */
+        39,  /* bottom_center -> BOTTOM_CENTRE */
+        40   /* bottom_right -> BOTTOM_RIGHT */
+    },       /* Black Q */
 };
 
 /* Fixed 3x4 red-back card layout from cards.gif/cards.tmx. */
 static const uint8_t kBackCardTiles[CARD_TILE_H][CARD_TILE_W] = {
-    {115, 116, 117},
-    {118, 119, 120},
-    {121, 122, 123},
-    {124, 125, 126},
+    {80, 81, 82},
+    {83, 84, 85},
+    {86, 87, 88},
+    {89, 90, 91},
 };
 
 gfx_error load_cards_palette(gfx_context* ctx)
@@ -186,6 +222,15 @@ gfx_error load_cards_tileset(gfx_context* ctx)
     }
 
     close(dev);
+
+    /*
+     * Reserve tile 255 as a guaranteed transparent tile (palette index 0),
+     * independent of artwork ordering inside cards.zts.
+     */
+    if (gfx_tileset_add_color_tile(ctx, 255, 0) != GFX_SUCCESS) {
+        return GFX_FAILURE;
+    }
+
     return GFX_SUCCESS;
 }
 
@@ -313,12 +358,22 @@ void assets_build_back_tile_grid(uint8_t grid[4][3])
     }
 }
 
-uint8_t assets_get_layout_tile(uint8_t x, uint8_t y)
+static uint8_t assets_get_layout_tile_from(const uint8_t* map, uint8_t x, uint8_t y)
 {
     if (x >= SCREEN_TILE_W || y >= SCREEN_TILE_H) {
         return EMPTY_TILE;
     }
-    return ((uint8_t*)&_ztm_cards_start)[((uint16_t)y * SCREEN_TILE_W) + x];
+    return map[((uint16_t)y * SCREEN_TILE_W) + x];
+}
+
+uint8_t assets_get_layout_tile(uint8_t x, uint8_t y)
+{
+    return assets_get_layout_tile_from((const uint8_t*)&_ztm_cards0000_start, x, y);
+}
+
+uint8_t assets_get_layout_overlay_tile(uint8_t x, uint8_t y)
+{
+    return assets_get_layout_tile_from((const uint8_t*)&_ztm_cards0001_start, x, y);
 }
 
 zos_err_t load_zmt(track_t* track, uint8_t index)
@@ -350,9 +405,13 @@ zos_err_t load_zmt(track_t* track, uint8_t index)
 void __assets__(void) __naked
 {
     __asm__(
-        "__ztm_cards_start:\n"
-        "    .incbin \"assets/cards.ztm\"\n"
-        "__ztm_cards_end:\n"
+        "__ztm_cards0000_start:\n"
+        "    .incbin \"assets/cards0000.ztm\"\n"
+        "__ztm_cards0000_end:\n"
+
+        "__ztm_cards0001_start:\n"
+        "    .incbin \"assets/cards0001.ztm\"\n"
+        "__ztm_cards0001_end:\n"
 
         "__zmt_track1_start:\n"
         "    .incbin \"assets/splash.zmt\"\n"

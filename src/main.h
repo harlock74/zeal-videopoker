@@ -22,16 +22,15 @@
 #define SHARED_SCRATCH_BUF_SIZE 1024
 
 /* Direct tileset IDs from cards.gif current font/overlay layout. */
-#define FONT_DIGIT_TILE 152
-#define FONT_ALPHA_A_TILE 162
-#define FONT_ALPHA_N_TILE 175
+#define FONT_DIGIT_TILE 134
+#define FONT_ALPHA_A_TILE 150
 /* Blank tile used as layer1 clear/space tile. */
-#define FONT_SPACE_TILE 3
-#define FONT_COLON_TILE 188
-#define FONT_EXCL_TILE 189
-#define HOLD_FRAME_TILE 119
+#define FONT_SPACE_TILE 0
+#define FONT_COLON_TILE 125
+#define FONT_EXCL_TILE 126
+#define HOLD_FRAME_TILE 127
 
-#define EMPTY_TILE FONT_SPACE_TILE
+#define EMPTY_TILE 46
 
 #define TILEMAP_LAYER 0
 #define UI_LAYER 1
