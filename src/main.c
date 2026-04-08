@@ -19,7 +19,6 @@
 #include "render.h"
 
 #define CARD_REVEAL_DELAY 4
-#define LAYOUT_SPACE_SAMPLE_X 2
 #define CONST_STR_LEN(arr) ((uint8_t)(sizeof(arr) - 1U))
 
 /* Global graphics context used by ZVB drawing APIs. */
@@ -211,7 +210,6 @@ static void render_splash_screen(void)
     static const uint8_t kTitleY = 10;
     static const char kTitleText[] = "ZEAL VIDEO POKER";
     static const uint8_t kTitleLen = CONST_STR_LEN(kTitleText);
-    // uint8_t bg_tile = assets_get_layout_tile(LAYOUT_SPACE_SAMPLE_X, hold_y);
     static const uint8_t bg_tile = 0;
     uint8_t title_x = (uint8_t)((SCREEN_TILE_W - kTitleLen) / 2);
 
