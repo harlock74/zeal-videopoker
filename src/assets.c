@@ -71,7 +71,12 @@ typedef enum {
     BOTTOM_RIGHT,
 } CardPos;
 
-#define POS_BIT(pos) ((uint16_t)(1U << (pos)))
+/*
+ * Pack four 3-bit rows into one 12-bit pip mask.
+ * Bit 0 = TOP_LEFT, bit 11 = BOTTOM_RIGHT.
+ */
+#define PIPS(r0, r1, r2, r3) \
+    ((uint16_t)((r0) | ((r1) << 3) | ((r2) << 6) | ((r3) << 9)))
 
 /* Core card composition tile IDs from cards.gif. */
 static const uint8_t kWhiteCardTile = 16;
@@ -252,24 +257,81 @@ static void set_card_pos(uint8_t grid[CARD_TILE_H][CARD_TILE_W], CardPos pos, ui
 
 static void set_pips_for_rank(uint8_t grid[CARD_TILE_H][CARD_TILE_W], uint8_t rank, uint8_t suit_tile)
 {
-    /*
-     * Pip layouts for A..10 as 12-bit masks over the 3x4 grid:
-     * indices:  0  1  2
-     *           3  4  5
-     *           6  7  8
-     *           9 10 11
-     */
-    static const uint16_t kPipMaskByRank[10] = {
-        /* A  */ POS_BIT(MIDDLE2_CENTRE),
-        /* 2  */ POS_BIT(MIDDLE1_CENTRE) | POS_BIT(BOTTOM_CENTRE),
-        /* 3  */ POS_BIT(MIDDLE1_CENTRE) | POS_BIT(MIDDLE2_CENTRE) | POS_BIT(BOTTOM_CENTRE),
-        /* 4  */ POS_BIT(MIDDLE1_LEFT) | POS_BIT(MIDDLE1_RIGHT) | POS_BIT(BOTTOM_LEFT) | POS_BIT(BOTTOM_RIGHT),
-        /* 5  */ POS_BIT(MIDDLE1_LEFT) | POS_BIT(MIDDLE1_RIGHT) | POS_BIT(MIDDLE2_CENTRE) | POS_BIT(BOTTOM_LEFT) | POS_BIT(BOTTOM_RIGHT),
-        /* 6  */ POS_BIT(MIDDLE1_LEFT) | POS_BIT(MIDDLE1_RIGHT) | POS_BIT(MIDDLE2_LEFT) | POS_BIT(MIDDLE2_RIGHT) | POS_BIT(BOTTOM_LEFT) | POS_BIT(BOTTOM_RIGHT),
-        /* 7  */ POS_BIT(MIDDLE1_LEFT) | POS_BIT(MIDDLE1_RIGHT) | POS_BIT(MIDDLE2_LEFT) | POS_BIT(MIDDLE2_CENTRE) | POS_BIT(MIDDLE2_RIGHT) | POS_BIT(BOTTOM_LEFT) | POS_BIT(BOTTOM_RIGHT),
-        /* 8  */ POS_BIT(MIDDLE1_LEFT) | POS_BIT(MIDDLE1_RIGHT) | POS_BIT(MIDDLE2_LEFT) | POS_BIT(MIDDLE2_CENTRE) | POS_BIT(MIDDLE2_RIGHT) | POS_BIT(BOTTOM_LEFT) | POS_BIT(BOTTOM_CENTRE) | POS_BIT(BOTTOM_RIGHT),
-        /* 9  */ POS_BIT(MIDDLE1_LEFT) | POS_BIT(MIDDLE1_CENTRE) | POS_BIT(MIDDLE1_RIGHT) | POS_BIT(MIDDLE2_LEFT) | POS_BIT(MIDDLE2_CENTRE) | POS_BIT(MIDDLE2_RIGHT) | POS_BIT(BOTTOM_LEFT) | POS_BIT(BOTTOM_CENTRE) | POS_BIT(BOTTOM_RIGHT),
-        /* 10 */ POS_BIT(TOP_CENTRE) | POS_BIT(MIDDLE1_LEFT) | POS_BIT(MIDDLE1_CENTRE) | POS_BIT(MIDDLE1_RIGHT) | POS_BIT(MIDDLE2_LEFT) | POS_BIT(MIDDLE2_CENTRE) | POS_BIT(MIDDLE2_RIGHT) | POS_BIT(BOTTOM_LEFT) | POS_BIT(BOTTOM_CENTRE) | POS_BIT(BOTTOM_RIGHT),
+    if (rank == RANK_ACE) {
+        /*
+         * card % 13 gives: A=0, 2=1, ..., 10=9, J=10, Q=11, K=12.
+         * We keep Ace (0) out of the table and handle it directly.
+         * Then the pip table is only 2..10 and indexing is simple:
+         *   table_index = rank - 1   // rank 1..9 -> index 0..8
+         */
+        set_card_pos(grid, MIDDLE2_CENTRE, suit_tile);
+        return;
+    }
+
+    /* Pip layouts for ranks 2..10 as four visual rows (top to bottom). */
+    static const uint16_t kPipMaskByRank[9] = {
+        /* 2
+           000
+           010
+           000
+           010 */
+        PIPS(0b000, 0b010, 0b000, 0b010),
+
+        /* 3
+           000
+           010
+           010
+           010 */
+        PIPS(0b000, 0b010, 0b010, 0b010),
+
+        /* 4
+           000
+           101
+           000
+           101 */
+        PIPS(0b000, 0b101, 0b000, 0b101),
+
+        /* 5
+           000
+           101
+           010
+           101 */
+        PIPS(0b000, 0b101, 0b010, 0b101),
+
+        /* 6
+           000
+           101
+           101
+           101 */
+        PIPS(0b000, 0b101, 0b101, 0b101),
+
+        /* 7
+           000
+           101
+           111
+           101 */
+        PIPS(0b000, 0b101, 0b111, 0b101),
+
+        /* 8
+           000
+           101
+           111
+           111 */
+        PIPS(0b000, 0b101, 0b111, 0b111),
+
+        /* 9
+           000
+           111
+           111
+           111 */
+        PIPS(0b000, 0b111, 0b111, 0b111),
+
+        /* 10
+           010
+           111
+           111
+           111 */
+        PIPS(0b010, 0b111, 0b111, 0b111),
     };
 
     uint16_t mask;
@@ -277,11 +339,11 @@ static void set_pips_for_rank(uint8_t grid[CARD_TILE_H][CARD_TILE_W], uint8_t ra
     uint8_t row;
     uint8_t col;
 
-    if (rank >= 10U) {
+    if (rank < 1U || rank >= 10U) {
         return;
     }
 
-    mask = kPipMaskByRank[rank];
+    mask = kPipMaskByRank[rank - 1U];
     for (pos = 0; pos < CARD_TILE_COUNT; pos++) {
         if (mask & (uint16_t)(1U << pos)) {
             row = (uint8_t)(pos / CARD_TILE_W);
