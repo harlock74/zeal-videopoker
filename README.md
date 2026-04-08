@@ -2,7 +2,7 @@
 
 Video Poker for Zeal 8-bit Computer.
 
-It runs at **320×240 @8bpp** and uses **RLE-compressed tiles**.
+It runs at **320×240 @8bpp**.
 
 ## Controls
 
