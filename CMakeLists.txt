@@ -55,14 +55,21 @@ tiled2zeal(${target_name} FILES
     "assets/cards.tmx"
 )
 
-add_asset(${target_name} FILES
-    "assets/splash.zmt"
-    "assets/music.zmt"
-)
-
 copy_assets(${target_name} FILES
     "assets/cards.zts"
     "assets/cards.ztp"
+)
+
+# Keep .zmt files external (not embedded): copy source tracks to runtime assets.
+add_custom_target(${target_name}_zmt_runtime_copy ALL
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/assets
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${CMAKE_CURRENT_SOURCE_DIR}/assets/splash.zmt
+            ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/assets/splash.zmt
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${CMAKE_CURRENT_SOURCE_DIR}/assets/music.zmt
+            ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/assets/music.zmt
+    VERBATIM
 )
 
 zgdk_add_outputs(${target_name})

@@ -9,10 +9,6 @@
 #include "assets.h"
 #include "app_state.h"
 
-extern uint8_t _zmt_track1_start;
-extern uint8_t _zmt_track1_end;
-extern uint8_t _zmt_track2_start;
-extern uint8_t _zmt_track2_end;
 extern uint8_t _ztm_cards0000_start;
 extern uint8_t _ztm_cards0000_end;
 extern uint8_t _ztm_cards0001_start;
@@ -446,20 +442,14 @@ zos_err_t load_zmt(track_t* track, uint8_t index)
     zmt_reset(VOL_50);
     switch (index) {
         case ZMT_INDEX_SPLASH: {
-            const size_t size = &_zmt_track1_end - &_zmt_track1_start;
-            err = zmt_rom_load(track, &_zmt_track1_start, size);
+            err = zmt_file_load(track, "assets/splash.zmt");
         } break;
         case ZMT_INDEX_GAME: {
-            const size_t size = &_zmt_track2_end - &_zmt_track2_start;
-            err = zmt_rom_load(track, &_zmt_track2_start, size);
+            err = zmt_file_load(track, "assets/music.zmt");
         } break;
     }
     if (err == ERR_SUCCESS) {
         track->title[0] = (char)index;
-    } else {
-        put_s("Warning: Failed to load track: ");
-        put_c((char)index);
-        put_c('\n');
     }
     return err;
 }
@@ -473,13 +463,5 @@ void __assets__(void) __naked
 
         "__ztm_cards0001_start:\n"
         "    .incbin \"assets/cards0001.ztm\"\n"
-        "__ztm_cards0001_end:\n"
-
-        "__zmt_track1_start:\n"
-        "    .incbin \"assets/splash.zmt\"\n"
-        "__zmt_track1_end:\n"
-
-        "__zmt_track2_start:\n"
-        "    .incbin \"assets/music.zmt\"\n"
-        "__zmt_track2_end:\n");
+        "__ztm_cards0001_end:\n");
 }
