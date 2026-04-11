@@ -51,6 +51,14 @@ gif2zeal(${target_name} FILES
     # COMPRESSED
 )
 
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/assets/rewards.gif")
+    gif2zeal(${target_name} FILES
+        "assets/rewards.gif"
+        BIT 2
+        COLORS 4
+    )
+endif()
+
 tiled2zeal(${target_name} FILES
     "assets/cards.tmx"
 )
@@ -59,6 +67,13 @@ copy_assets(${target_name} FILES
     "assets/cards.zts"
     "assets/cards.ztp"
 )
+
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/assets/rewards.gif")
+    copy_assets(${target_name} FILES
+        "assets/rewards.zts"
+        "assets/rewards.ztp"
+    )
+endif()
 
 # Keep .zmt files external (not embedded): copy source tracks to runtime assets.
 add_custom_target(${target_name}_zmt_runtime_copy ALL

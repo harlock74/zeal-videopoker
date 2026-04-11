@@ -20,6 +20,13 @@
 
 #define CARD_REVEAL_DELAY 4
 #define CONST_STR_LEN(arr) ((uint8_t)(sizeof(arr) - 1U))
+#define REWARD_STAGE_COUNT 4
+
+/*
+ * Reward milestone configuration (easy to tweak gameplay goals):
+ * stage 1..4 unlock when cumulative won credits reaches these values.
+ */
+static const uint16_t kRewardWinMilestones[REWARD_STAGE_COUNT] = {3, 6, 9, 12};
 
 /* Global graphics context used by ZVB drawing APIs. */
 gfx_context vctx;
@@ -54,6 +61,10 @@ static uint8_t reveal_cooldown = 0;
 static uint8_t reveal_active = 0;
 /* Deferred game-over transition to splash/reset, executed safely in update(). */
 uint8_t pending_bankrupt_reset = 0;
+/* Reward progression state based on cumulative won credits. */
+static uint16_t total_win_points = 0;
+static uint8_t unlocked_reward_stage = 0;
+static uint8_t pending_reward_stage = 0;
 /* Reusable static scratch buffers to avoid stack-heavy local arrays on SDCC. */
 uint8_t scratch_tile_grid[SRC_CARD_H][SRC_CARD_W];
 static uint8_t draw_hand_cards_buf[CARD_COUNT];
@@ -111,6 +122,7 @@ static void draw_splash_border(void);
 static void render_splash_screen(void);
 static void poll_keys(KeyEvents* ev);
 static void print_error_u16(const char* prefix, uint16_t value);
+static void show_reward_bitmap_blocking(uint8_t stage);
 
 static void load_ui_font_tiles(void)
 {
@@ -301,6 +313,14 @@ void draw_hand(void)
     result = evaluate_hand(draw_hand_cards_buf);
     win_amount = (uint16_t)result.multiplier * bet;
     credits += win_amount;
+    if (win_amount > 0) {
+        total_win_points = (uint16_t)(total_win_points + win_amount);
+        while (unlocked_reward_stage < REWARD_STAGE_COUNT &&
+               total_win_points >= kRewardWinMilestones[unlocked_reward_stage]) {
+            unlocked_reward_stage++;
+            pending_reward_stage = unlocked_reward_stage;
+        }
+    }
     for (uint8_t i = 0; i < CARD_COUNT; i++) {
         cards[i].held = false;
     }
@@ -485,6 +505,9 @@ static void perform_bankrupt_reset_with_splash(void)
     needs_redraw = 0;
     needs_hud_redraw = 0;
     pending_bankrupt_reset = 0;
+    total_win_points = 0;
+    unlocked_reward_stage = 0;
+    pending_reward_stage = 0;
 }
 
 static void return_to_bet_phase(void)
@@ -503,6 +526,65 @@ static void return_to_bet_phase(void)
     suppress_enter_ticks = 8;
     needs_redraw = 1;
     needs_hud_redraw = 0;
+    pending_reward_stage = 0;
+}
+
+static void show_reward_bitmap_blocking(uint8_t stage)
+{
+    /*
+     * Reward screen flow:
+     * - Switch to bitmap mode and load rewards image assets from disk
+     * - Wait for Enter/Space (with release gate to avoid instant auto-close)
+     * - Restore normal poker graphics mode and redraw current game state
+     */
+    uint8_t enter_or_space_released = 0;
+
+    gfx_enable_screen(0);
+    if (gfx_initialize(ZVB_CTRL_VID_MODE_BITMAP_256_MODE, &vctx) != GFX_SUCCESS) {
+        goto restore_game_mode;
+    }
+    if (load_rewards_palette(&vctx) != GFX_SUCCESS) {
+        goto restore_game_mode;
+    }
+    if (load_rewards_bitmap_256(&vctx, stage) != GFX_SUCCESS) {
+        goto restore_game_mode;
+    }
+    gfx_enable_screen(1);
+
+    while (1) {
+        KeyEvents ev;
+        poll_keys(&ev);
+        sound_loop();
+        tick_current_music();
+
+        if (!ev.enter && !ev.space) {
+            enter_or_space_released = 1;
+        }
+
+        if (enter_or_space_released && (ev.enter || ev.space)) {
+            break;
+        }
+
+        gfx_wait_vblank(&vctx);
+        gfx_wait_end_vblank(&vctx);
+    }
+
+restore_game_mode:
+    gfx_enable_screen(0);
+    if (gfx_initialize(ZVB_CTRL_VID_MODE_GFX_640_8BIT, &vctx) == GFX_SUCCESS) {
+        if (load_cards_palette(&vctx) == GFX_SUCCESS &&
+            load_cards_tileset(&vctx) == GFX_SUCCESS)
+        {
+            load_ui_font_tiles();
+            clear_layers();
+            render_table();
+            render_mark_all_slots_dirty();
+            render_cards();
+            needs_redraw = 0;
+            needs_hud_redraw = 0;
+        }
+    }
+    gfx_enable_screen(1);
 }
 
 static void poll_keys(KeyEvents* ev)
@@ -681,6 +763,21 @@ void update(void)
     }
 
     if (state == STATE_RESULT) {
+        if (pending_reward_stage > 0) {
+            /*
+             * Reward display is part of this result hand.
+             * Do not allow Enter/Space to return to BET while reveal is still
+             * running, otherwise the reward can be skipped intermittently.
+             */
+            if (reveal_active) {
+                return;
+            }
+
+            show_reward_bitmap_blocking(pending_reward_stage);
+            pending_reward_stage = 0;
+            return;
+        }
+
         /* RESULT waits for confirmation before returning to BET phase. */
         if (suppress_enter_ticks == 0) {
             if (!pending_bankrupt_reset && show_win_banner && (ev.up || ev.down || ev.enter || ev.space)) {
