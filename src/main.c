@@ -539,6 +539,13 @@ static void show_reward_bitmap_blocking(uint8_t stage)
      */
     uint8_t enter_or_space_released = 0;
 
+    /*
+     * Reward asset loading can take multiple frames; stop tracker/audio first
+     * to avoid a sustained "stuck pitch" while loading/decode is in progress.
+     */
+    stop_current_music();
+    sound_stop_all();
+
     gfx_enable_screen(0);
     if (gfx_initialize(ZVB_CTRL_VID_MODE_BITMAP_256_MODE, &vctx) != GFX_SUCCESS) {
         goto restore_game_mode;
@@ -584,6 +591,8 @@ restore_game_mode:
             needs_hud_redraw = 0;
         }
     }
+    /* Resume normal gameplay music after returning to tile mode. */
+    start_game_music();
     gfx_enable_screen(1);
 }
 
