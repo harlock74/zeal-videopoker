@@ -774,16 +774,22 @@ void update(void)
     if (state == STATE_RESULT) {
         if (pending_reward_stage > 0) {
             /*
-             * Reward display is part of this result hand.
-             * Do not allow Enter/Space to return to BET while reveal is still
-             * running, otherwise the reward can be skipped intermittently.
+             * Reward display is part of this result hand and should only appear
+             * after the player confirms from the win/result banner.
+             * Keep RESULT locked until reveal is finished and Enter/Space is
+             * pressed, then show the reward screen as the surprise moment.
              */
             if (reveal_active) {
                 return;
             }
 
-            show_reward_bitmap_blocking(pending_reward_stage);
-            pending_reward_stage = 0;
+            if (suppress_enter_ticks == 0 && confirm_armed && (ev.enter || ev.space)) {
+                confirm_armed = 0;
+                show_win_banner = 0;
+                needs_hud_redraw = 1;
+                show_reward_bitmap_blocking(pending_reward_stage);
+                pending_reward_stage = 0;
+            }
             return;
         }
 
