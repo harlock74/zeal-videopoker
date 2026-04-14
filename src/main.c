@@ -17,16 +17,10 @@
 #include "splash.h"
 #include "gameplay.h"
 #include "render.h"
+#include "rewards.h"
 
 #define CARD_REVEAL_DELAY 4
 #define CONST_STR_LEN(arr) ((uint8_t)(sizeof(arr) - 1U))
-#define REWARD_STAGE_COUNT 4
-
-/*
- * Reward milestone configuration (easy to tweak gameplay goals):
- * stage 1..4 unlock when cumulative won credits reaches these values.
- */
-static const uint16_t kRewardWinMilestones[REWARD_STAGE_COUNT] = {3, 6, 9, 12};
 
 /* Global graphics context used by ZVB drawing APIs. */
 gfx_context vctx;
@@ -59,12 +53,10 @@ static uint8_t reveal_len = 0;
 static uint8_t reveal_index = 0;
 static uint8_t reveal_cooldown = 0;
 static uint8_t reveal_active = 0;
+/* Final reward stage UX gate: show banner before full-picture reveal. */
+static uint8_t reward_final_prompt_armed = 0;
 /* Deferred game-over transition to splash/reset, executed safely in update(). */
 uint8_t pending_bankrupt_reset = 0;
-/* Reward progression state based on cumulative won credits. */
-static uint16_t total_win_points = 0;
-static uint8_t unlocked_reward_stage = 0;
-static uint8_t pending_reward_stage = 0;
 /* Reusable static scratch buffers to avoid stack-heavy local arrays on SDCC. */
 uint8_t scratch_tile_grid[SRC_CARD_H][SRC_CARD_W];
 static uint8_t draw_hand_cards_buf[CARD_COUNT];
@@ -313,14 +305,7 @@ void draw_hand(void)
     result = evaluate_hand(draw_hand_cards_buf);
     win_amount = (uint16_t)result.multiplier * bet;
     credits += win_amount;
-    if (win_amount > 0) {
-        total_win_points = (uint16_t)(total_win_points + win_amount);
-        while (unlocked_reward_stage < REWARD_STAGE_COUNT &&
-               total_win_points >= kRewardWinMilestones[unlocked_reward_stage]) {
-            unlocked_reward_stage++;
-            pending_reward_stage = unlocked_reward_stage;
-        }
-    }
+    rewards_register_hand_result(win_amount);
     for (uint8_t i = 0; i < CARD_COUNT; i++) {
         cards[i].held = false;
     }
@@ -505,9 +490,8 @@ static void perform_bankrupt_reset_with_splash(void)
     needs_redraw = 0;
     needs_hud_redraw = 0;
     pending_bankrupt_reset = 0;
-    total_win_points = 0;
-    unlocked_reward_stage = 0;
-    pending_reward_stage = 0;
+    rewards_reset();
+    reward_final_prompt_armed = 0;
 }
 
 static void return_to_bet_phase(void)
@@ -526,7 +510,8 @@ static void return_to_bet_phase(void)
     suppress_enter_ticks = 8;
     needs_redraw = 1;
     needs_hud_redraw = 0;
-    pending_reward_stage = 0;
+    rewards_clear_pending();
+    reward_final_prompt_armed = 0;
 }
 
 static void show_reward_bitmap_blocking(uint8_t stage)
@@ -689,6 +674,7 @@ void init(void)
 
     seed_rng_from_time();
     shuffle_deck();
+    rewards_reset();
     show_card_faces = 0;
     start_reveal_sequence(all_slots, CARD_COUNT, 0);
     state = STATE_BET;
@@ -772,7 +758,7 @@ void update(void)
     }
 
     if (state == STATE_RESULT) {
-        if (pending_reward_stage > 0) {
+        if (rewards_has_pending()) {
             /*
              * Reward display is part of this result hand and should only appear
              * after the player confirms from the win/result banner.
@@ -783,12 +769,31 @@ void update(void)
                 return;
             }
 
+            if (rewards_pending_stage() == REWARD_STAGE_COUNT && !reward_final_prompt_armed) {
+                str_cpy(win_banner_text, "WELL DONE ENJOY THE FULL REWARD!");
+                show_win_banner = 1;
+                needs_hud_redraw = 1;
+                reward_final_prompt_armed = 1;
+                return;
+            }
+
             if (suppress_enter_ticks == 0 && confirm_armed && (ev.enter || ev.space)) {
+                uint8_t reward_stage = rewards_pending_stage();
                 confirm_armed = 0;
                 show_win_banner = 0;
                 needs_hud_redraw = 1;
-                show_reward_bitmap_blocking(pending_reward_stage);
-                pending_reward_stage = 0;
+                show_reward_bitmap_blocking(reward_stage);
+                rewards_clear_pending();
+                reward_final_prompt_armed = 0;
+
+                /*
+                 * Final reward stage behavior:
+                 * after enjoying the full reveal, return to splash and
+                 * restart the game from a clean state.
+                 */
+                if (reward_stage == REWARD_STAGE_COUNT) {
+                    perform_bankrupt_reset_with_splash();
+                }
             }
             return;
         }

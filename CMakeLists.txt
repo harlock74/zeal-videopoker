@@ -31,6 +31,7 @@ add_executable(${target_name}
     src/splash.c
     src/gameplay.c
     src/render.c
+    src/rewards.c
     src/assets.c
 )
 # prevent linking against stdlib

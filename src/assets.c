@@ -274,6 +274,15 @@ gfx_error load_rewards_bitmap_256(gfx_context* ctx, uint8_t reveal_stage)
         TILE_BYTES_2BPP = 64
     };
 
+    static const uint8_t kStageThresholdByStage[6] = {
+        /* Approx visible fractions: 1/8, 1/6, 1/4, 1/3, 1/2, full. */
+        24,   /* ~9.4%  */
+        43,   /* ~16.8% */
+        64,   /* ~25.0% */
+        85,   /* ~33.2% */
+        128,  /* ~50.0% */
+        255   /* 100% */
+    };
     static uint8_t tile_data[TILE_BYTES_2BPP];
     static uint8_t row_bytes[4];
     static uint8_t row8[TILE_W];
@@ -281,8 +290,8 @@ gfx_error load_rewards_bitmap_256(gfx_context* ctx, uint8_t reveal_stage)
 
     if (stage < 1U) {
         stage = 1U;
-    } else if (stage > 4U) {
-        stage = 4U;
+    } else if (stage > 6U) {
+        stage = 6U;
     }
 
     zos_dev_t dev = open("assets/rewards.zts", O_RDONLY);
@@ -329,21 +338,23 @@ gfx_error load_rewards_bitmap_256(gfx_context* ctx, uint8_t reveal_stage)
             row8[14] = (uint8_t)((row_bytes[3] >> 2) & 0x03);
             row8[15] = (uint8_t)(row_bytes[3] & 0x03);
 
-            if (stage < 4U) {
+            if (stage < 6U) {
                 /*
                  * Progressive reveal:
-                 * - stage 1 -> show only pixels where (index % 4) == 0
-                 * - stage 2 -> show indices %4 in {0,1}
-                 * - stage 3 -> show indices %4 in {0,1,2}
-                 * - stage 4 -> show full image
+                 * - 6 cumulative stages with deterministic pseudo-random spread
+                 *   so early stages don't reveal obvious outlines.
+                 * - Stage fractions: 1/8, 1/6, 1/4, 1/3, 1/2, full.
                  */
+                uint8_t threshold = kStageThresholdByStage[(uint8_t)(stage - 1U)];
                 uint16_t y = (uint16_t)tile_y * TILE_H + row;
-                uint16_t x_base = (uint16_t)tile_x * TILE_W;
-                uint16_t base = (uint16_t)(y * BMP_W);
 
                 for (uint8_t i = 0; i < TILE_W; i++) {
-                    uint16_t linear_index = (uint16_t)(base + x_base + i);
-                    if ((linear_index & 0x03U) >= stage) {
+                    uint8_t x = (uint8_t)((uint8_t)tile_x * TILE_W + i);
+                    uint8_t h = x;
+                    h ^= (uint8_t)((x << 5) | (x >> 3));
+                    h ^= (uint8_t)((y << 3) | (y >> 5));
+                    h ^= (uint8_t)(y << 1);
+                    if (h >= threshold) {
                         row8[i] = 0;
                     }
                 }
