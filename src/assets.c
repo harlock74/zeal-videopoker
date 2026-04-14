@@ -159,10 +159,10 @@ static const uint8_t kBackCardTiles[CARD_TILE_H][CARD_TILE_W] = {
     {89, 90, 91},
 };
 
-gfx_error load_cards_palette(gfx_context* ctx)
+static gfx_error load_palette_from_file(gfx_context* ctx, const char* path)
 {
     uint8_t from_color = 0;
-    zos_dev_t dev = open("assets/cards.ztp", O_RDONLY);
+    zos_dev_t dev = open(path, O_RDONLY);
     if (dev < 0) {
         return GFX_FAILURE;
     }
@@ -189,19 +189,18 @@ gfx_error load_cards_palette(gfx_context* ctx)
     return GFX_SUCCESS;
 }
 
-gfx_error load_cards_tileset(gfx_context* ctx)
+static gfx_error load_tileset_from_file(gfx_context* ctx, const char* path, uint8_t compression_mode, uint16_t vram_scale)
 {
     uint16_t from_byte = 0;
-    zos_dev_t dev = open("assets/cards.zts", O_RDONLY);
+    zos_dev_t dev = open(path, O_RDONLY);
     if (dev < 0) {
         return GFX_FAILURE;
     }
 
-    /* Stream 4-bit packed ZTS chunks and let ZVB decode to 8-bit tiles in VRAM. */
     while (1) {
         uint16_t size = sizeof(g_buf);
         gfx_tileset_options options = {
-            .compression = TILESET_COMP_4BIT,
+            .compression = compression_mode,
             .from_byte = from_byte,
             .pal_offset = 0,
             .opacity = 0,
@@ -219,10 +218,23 @@ gfx_error load_cards_tileset(gfx_context* ctx)
             close(dev);
             return GFX_FAILURE;
         }
-        from_byte = (uint16_t)(from_byte + (size * 2U));
+        from_byte = (uint16_t)(from_byte + (size * vram_scale));
     }
 
     close(dev);
+    return GFX_SUCCESS;
+}
+
+gfx_error load_cards_palette(gfx_context* ctx)
+{
+    return load_palette_from_file(ctx, "assets/cards.ztp");
+}
+
+gfx_error load_cards_tileset(gfx_context* ctx)
+{
+    if (load_tileset_from_file(ctx, "assets/cards.zts", TILESET_COMP_4BIT, 2) != GFX_SUCCESS) {
+        return GFX_FAILURE;
+    }
 
     /*
      * Reserve tile 255 as a guaranteed transparent tile (palette index 0),
@@ -232,6 +244,130 @@ gfx_error load_cards_tileset(gfx_context* ctx)
         return GFX_FAILURE;
     }
 
+    return GFX_SUCCESS;
+}
+
+gfx_error load_rewards_palette(gfx_context* ctx)
+{
+    return load_palette_from_file(ctx, "assets/rewards.ztp");
+}
+
+gfx_error load_rewards_bitmap_256(gfx_context* ctx, uint8_t reveal_stage)
+{
+    /*
+     * rewards.zts is exported as a tileset (tile-major), not linear scanlines.
+     * For bitmap mode, VRAM expects linear 8bpp pixel indices:
+     *   byte offset = y * 256 + x
+     *
+     * gif2zeal outputs 16x16 tiles for ZVB assets.
+     * In 2bpp, each tile row is 16 pixels packed into 4 bytes:
+     *   [p0 p1 p2 p3] [p4 p5 p6 p7] [p8 p9 p10 p11] [p12 p13 p14 p15]
+     * where each p is a 2-bit palette index.
+     */
+    enum {
+        BMP_W = 256,
+        BMP_H = 240,
+        TILE_W = 16,
+        TILE_H = 16,
+        TILES_X = BMP_W / TILE_W,
+        TILES_Y = BMP_H / TILE_H,
+        TILE_BYTES_2BPP = 64
+    };
+
+    static const uint8_t kStageThresholdByStage[6] = {
+        /* Approx visible fractions: 1/8, 1/6, 1/4, 1/3, 1/2, full. */
+        24,   /* ~9.4%  */
+        43,   /* ~16.8% */
+        64,   /* ~25.0% */
+        85,   /* ~33.2% */
+        128,  /* ~50.0% */
+        255   /* 100% */
+    };
+    static uint8_t tile_data[TILE_BYTES_2BPP];
+    static uint8_t row_bytes[4];
+    static uint8_t row8[TILE_W];
+    uint8_t stage = reveal_stage;
+
+    if (stage < 1U) {
+        stage = 1U;
+    } else if (stage > 6U) {
+        stage = 6U;
+    }
+
+    zos_dev_t dev = open("assets/rewards.zts", O_RDONLY);
+    if (dev < 0) {
+        return GFX_FAILURE;
+    }
+
+    for (uint16_t tile_idx = 0; tile_idx < (uint16_t)(TILES_X * TILES_Y); tile_idx++) {
+        uint16_t size = TILE_BYTES_2BPP;
+        uint8_t tile_x = (uint8_t)(tile_idx % TILES_X);
+        uint8_t tile_y = (uint8_t)(tile_idx / TILES_X);
+
+        if (read(dev, tile_data, &size) != ERR_SUCCESS || size != TILE_BYTES_2BPP) {
+            close(dev);
+            return GFX_FAILURE;
+        }
+
+        for (uint8_t row = 0; row < TILE_H; row++) {
+            row_bytes[0] = tile_data[(uint8_t)(row * 4)];
+            row_bytes[1] = tile_data[(uint8_t)(row * 4 + 1)];
+            row_bytes[2] = tile_data[(uint8_t)(row * 4 + 2)];
+            row_bytes[3] = tile_data[(uint8_t)(row * 4 + 3)];
+            gfx_tileset_options options = {
+                .compression = TILESET_COMP_NONE,
+                .from_byte = (uint16_t)(((uint16_t)tile_y * TILE_H + row) * BMP_W + ((uint16_t)tile_x * TILE_W)),
+                .pal_offset = 0,
+                .opacity = 0,
+            };
+
+            row8[0]  = (uint8_t)((row_bytes[0] >> 6) & 0x03);
+            row8[1]  = (uint8_t)((row_bytes[0] >> 4) & 0x03);
+            row8[2]  = (uint8_t)((row_bytes[0] >> 2) & 0x03);
+            row8[3]  = (uint8_t)(row_bytes[0] & 0x03);
+            row8[4]  = (uint8_t)((row_bytes[1] >> 6) & 0x03);
+            row8[5]  = (uint8_t)((row_bytes[1] >> 4) & 0x03);
+            row8[6]  = (uint8_t)((row_bytes[1] >> 2) & 0x03);
+            row8[7]  = (uint8_t)(row_bytes[1] & 0x03);
+            row8[8]  = (uint8_t)((row_bytes[2] >> 6) & 0x03);
+            row8[9]  = (uint8_t)((row_bytes[2] >> 4) & 0x03);
+            row8[10] = (uint8_t)((row_bytes[2] >> 2) & 0x03);
+            row8[11] = (uint8_t)(row_bytes[2] & 0x03);
+            row8[12] = (uint8_t)((row_bytes[3] >> 6) & 0x03);
+            row8[13] = (uint8_t)((row_bytes[3] >> 4) & 0x03);
+            row8[14] = (uint8_t)((row_bytes[3] >> 2) & 0x03);
+            row8[15] = (uint8_t)(row_bytes[3] & 0x03);
+
+            if (stage < 6U) {
+                /*
+                 * Progressive reveal:
+                 * - 6 cumulative stages with deterministic pseudo-random spread
+                 *   so early stages don't reveal obvious outlines.
+                 * - Stage fractions: 1/8, 1/6, 1/4, 1/3, 1/2, full.
+                 */
+                uint8_t threshold = kStageThresholdByStage[(uint8_t)(stage - 1U)];
+                uint16_t y = (uint16_t)tile_y * TILE_H + row;
+
+                for (uint8_t i = 0; i < TILE_W; i++) {
+                    uint8_t x = (uint8_t)((uint8_t)tile_x * TILE_W + i);
+                    uint8_t h = x;
+                    h ^= (uint8_t)((x << 5) | (x >> 3));
+                    h ^= (uint8_t)((y << 3) | (y >> 5));
+                    h ^= (uint8_t)(y << 1);
+                    if (h >= threshold) {
+                        row8[i] = 0;
+                    }
+                }
+            }
+
+            if (gfx_tileset_load(ctx, row8, TILE_W, &options) != GFX_SUCCESS) {
+                close(dev);
+                return GFX_FAILURE;
+            }
+        }
+    }
+
+    close(dev);
     return GFX_SUCCESS;
 }
 

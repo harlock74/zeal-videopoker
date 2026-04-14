@@ -17,6 +17,7 @@
 #include "splash.h"
 #include "gameplay.h"
 #include "render.h"
+#include "rewards.h"
 
 #define CARD_REVEAL_DELAY 4
 #define CONST_STR_LEN(arr) ((uint8_t)(sizeof(arr) - 1U))
@@ -52,6 +53,8 @@ static uint8_t reveal_len = 0;
 static uint8_t reveal_index = 0;
 static uint8_t reveal_cooldown = 0;
 static uint8_t reveal_active = 0;
+/* Final reward stage UX gate: show banner before full-picture reveal. */
+static uint8_t reward_final_prompt_armed = 0;
 /* Deferred game-over transition to splash/reset, executed safely in update(). */
 uint8_t pending_bankrupt_reset = 0;
 /* Reusable static scratch buffers to avoid stack-heavy local arrays on SDCC. */
@@ -111,6 +114,7 @@ static void draw_splash_border(void);
 static void render_splash_screen(void);
 static void poll_keys(KeyEvents* ev);
 static void print_error_u16(const char* prefix, uint16_t value);
+static void show_reward_bitmap_blocking(uint8_t stage);
 
 static void load_ui_font_tiles(void)
 {
@@ -301,6 +305,7 @@ void draw_hand(void)
     result = evaluate_hand(draw_hand_cards_buf);
     win_amount = (uint16_t)result.multiplier * bet;
     credits += win_amount;
+    rewards_register_hand_result(win_amount);
     for (uint8_t i = 0; i < CARD_COUNT; i++) {
         cards[i].held = false;
     }
@@ -485,6 +490,8 @@ static void perform_bankrupt_reset_with_splash(void)
     needs_redraw = 0;
     needs_hud_redraw = 0;
     pending_bankrupt_reset = 0;
+    rewards_reset();
+    reward_final_prompt_armed = 0;
 }
 
 static void return_to_bet_phase(void)
@@ -503,6 +510,75 @@ static void return_to_bet_phase(void)
     suppress_enter_ticks = 8;
     needs_redraw = 1;
     needs_hud_redraw = 0;
+    rewards_clear_pending();
+    reward_final_prompt_armed = 0;
+}
+
+static void show_reward_bitmap_blocking(uint8_t stage)
+{
+    /*
+     * Reward screen flow:
+     * - Switch to bitmap mode and load rewards image assets from disk
+     * - Wait for Enter/Space (with release gate to avoid instant auto-close)
+     * - Restore normal poker graphics mode and redraw current game state
+     */
+    uint8_t enter_or_space_released = 0;
+
+    /*
+     * Reward asset loading can take multiple frames; stop tracker/audio first
+     * to avoid a sustained "stuck pitch" while loading/decode is in progress.
+     */
+    stop_current_music();
+    sound_stop_all();
+
+    gfx_enable_screen(0);
+    if (gfx_initialize(ZVB_CTRL_VID_MODE_BITMAP_256_MODE, &vctx) != GFX_SUCCESS) {
+        goto restore_game_mode;
+    }
+    if (load_rewards_palette(&vctx) != GFX_SUCCESS) {
+        goto restore_game_mode;
+    }
+    if (load_rewards_bitmap_256(&vctx, stage) != GFX_SUCCESS) {
+        goto restore_game_mode;
+    }
+    gfx_enable_screen(1);
+
+    while (1) {
+        KeyEvents ev;
+        poll_keys(&ev);
+        sound_loop();
+        tick_current_music();
+
+        if (!ev.enter && !ev.space) {
+            enter_or_space_released = 1;
+        }
+
+        if (enter_or_space_released && (ev.enter || ev.space)) {
+            break;
+        }
+
+        gfx_wait_vblank(&vctx);
+        gfx_wait_end_vblank(&vctx);
+    }
+
+restore_game_mode:
+    gfx_enable_screen(0);
+    if (gfx_initialize(ZVB_CTRL_VID_MODE_GFX_640_8BIT, &vctx) == GFX_SUCCESS) {
+        if (load_cards_palette(&vctx) == GFX_SUCCESS &&
+            load_cards_tileset(&vctx) == GFX_SUCCESS)
+        {
+            load_ui_font_tiles();
+            clear_layers();
+            render_table();
+            render_mark_all_slots_dirty();
+            render_cards();
+            needs_redraw = 0;
+            needs_hud_redraw = 0;
+        }
+    }
+    /* Resume normal gameplay music after returning to tile mode. */
+    start_game_music();
+    gfx_enable_screen(1);
 }
 
 static void poll_keys(KeyEvents* ev)
@@ -598,6 +674,7 @@ void init(void)
 
     seed_rng_from_time();
     shuffle_deck();
+    rewards_reset();
     show_card_faces = 0;
     start_reveal_sequence(all_slots, CARD_COUNT, 0);
     state = STATE_BET;
@@ -681,6 +758,46 @@ void update(void)
     }
 
     if (state == STATE_RESULT) {
+        if (rewards_has_pending()) {
+            /*
+             * Reward display is part of this result hand and should only appear
+             * after the player confirms from the win/result banner.
+             * Keep RESULT locked until reveal is finished and Enter/Space is
+             * pressed, then show the reward screen as the surprise moment.
+             */
+            if (reveal_active) {
+                return;
+            }
+
+            if (rewards_pending_stage() == REWARD_STAGE_COUNT && !reward_final_prompt_armed) {
+                str_cpy(win_banner_text, "WELL DONE ENJOY THE FULL REWARD!");
+                show_win_banner = 1;
+                needs_hud_redraw = 1;
+                reward_final_prompt_armed = 1;
+                return;
+            }
+
+            if (suppress_enter_ticks == 0 && confirm_armed && (ev.enter || ev.space)) {
+                uint8_t reward_stage = rewards_pending_stage();
+                confirm_armed = 0;
+                show_win_banner = 0;
+                needs_hud_redraw = 1;
+                show_reward_bitmap_blocking(reward_stage);
+                rewards_clear_pending();
+                reward_final_prompt_armed = 0;
+
+                /*
+                 * Final reward stage behavior:
+                 * after enjoying the full reveal, return to splash and
+                 * restart the game from a clean state.
+                 */
+                if (reward_stage == REWARD_STAGE_COUNT) {
+                    perform_bankrupt_reset_with_splash();
+                }
+            }
+            return;
+        }
+
         /* RESULT waits for confirmation before returning to BET phase. */
         if (suppress_enter_ticks == 0) {
             if (!pending_bankrupt_reset && show_win_banner && (ev.up || ev.down || ev.enter || ev.space)) {
