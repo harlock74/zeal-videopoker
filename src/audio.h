@@ -2,8 +2,6 @@
 
 #include <stdint.h>
 
-#include "main.h"
-
 void audio_toggle_game_audio_mode(void);
 void start_splash_music(void);
 void start_game_music(void);
