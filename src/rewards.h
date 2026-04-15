@@ -4,8 +4,11 @@
 
 /*
  * Reward progression API:
- * - Tracks cumulative won credits.
- * - Unlocks staged reward reveals at configurable milestones.
+ * - Tracks reward progression points (not won credits).
+ * - Progression model:
+ *   +1 for each resolved hand,
+ *   +1 extra when the hand is a winning hand.
+ * - Unlocks staged reward reveals at configurable progression milestones.
  */
 
 #define REWARD_STAGE_COUNT 6

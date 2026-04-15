@@ -10,7 +10,7 @@
  * - +1 for every resolved hand
  * - +1 extra if that hand is a winning hand
  */
-static const uint16_t kRewardWinMilestones[REWARD_STAGE_COUNT] = {5, 10, 15, 20, 25, 30};
+static const uint16_t kRewardProgressMilestones[REWARD_STAGE_COUNT] = {5, 10, 15, 20, 25, 30};
 
 static uint16_t reward_progress = 0;
 static uint8_t unlocked_reward_stage = 0;
@@ -32,7 +32,7 @@ void rewards_register_hand_result(uint16_t win_amount)
     }
 
     while (unlocked_reward_stage < REWARD_STAGE_COUNT &&
-           reward_progress >= kRewardWinMilestones[unlocked_reward_stage]) {
+           reward_progress >= kRewardProgressMilestones[unlocked_reward_stage]) {
         unlocked_reward_stage++;
         pending_reward_stage = unlocked_reward_stage;
     }
