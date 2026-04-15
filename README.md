@@ -8,6 +8,12 @@ It runs at **640×480 @8bpp**.
 
 zeal-videopoker contains sound effects and background music composed with Zeal Music Track (ZMT). There is one dedicated music track for the splash screen and one dedicated music track for gameplay. Feel free to create your own tracks and include them in the game. In `/alternative music tracks/gameplay tracks` you will find "Vivaldi" and "Beethoven" style alternatives to get you started.
 
+## Screenshots
+
+| Splash Screen  | Gameplay |
+| - | - |
+| ![image](https://github.com/harlock74/zeal-videopoker/blob/main/docs/screenshots/1.png) | ![image](https://github.com/harlock74/zeal-videopoker/blob/main/docs/screenshots/2.png) |
+
 ## Controls
 
 - `UP` / `DOWN`: increase/decrease bet (bet phase)
