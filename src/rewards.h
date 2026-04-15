@@ -17,4 +17,6 @@ void rewards_reset(void);
 void rewards_register_hand_result(uint16_t win_amount);
 uint8_t rewards_has_pending(void);
 uint8_t rewards_pending_stage(void);
+uint8_t rewards_is_final_stage_pending(void);
+uint8_t rewards_consume_pending_stage(void);
 void rewards_clear_pending(void);

@@ -769,7 +769,7 @@ void update(void)
                 return;
             }
 
-            if (rewards_pending_stage() == REWARD_STAGE_COUNT && !reward_final_prompt_armed) {
+            if (rewards_is_final_stage_pending() && !reward_final_prompt_armed) {
                 str_cpy(win_banner_text, "WELL DONE ENJOY THE FULL REWARD!");
                 show_win_banner = 1;
                 needs_hud_redraw = 1;
@@ -778,12 +778,11 @@ void update(void)
             }
 
             if (suppress_enter_ticks == 0 && confirm_armed && (ev.enter || ev.space)) {
-                uint8_t reward_stage = rewards_pending_stage();
+                uint8_t reward_stage = rewards_consume_pending_stage();
                 confirm_armed = 0;
                 show_win_banner = 0;
                 needs_hud_redraw = 1;
                 show_reward_bitmap_blocking(reward_stage);
-                rewards_clear_pending();
                 reward_final_prompt_armed = 0;
 
                 /*

@@ -48,6 +48,18 @@ uint8_t rewards_pending_stage(void)
     return pending_reward_stage;
 }
 
+uint8_t rewards_is_final_stage_pending(void)
+{
+    return (pending_reward_stage == REWARD_STAGE_COUNT);
+}
+
+uint8_t rewards_consume_pending_stage(void)
+{
+    uint8_t stage = pending_reward_stage;
+    pending_reward_stage = 0;
+    return stage;
+}
+
 void rewards_clear_pending(void)
 {
     pending_reward_stage = 0;
