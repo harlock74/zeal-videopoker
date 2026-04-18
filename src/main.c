@@ -118,6 +118,7 @@ static void print_error_u16(const char* prefix, uint16_t value);
 static void show_reward_bitmap_blocking(uint8_t stage);
 static void mix_entropy_u16(uint16_t value);
 static void entropy_event(uint8_t tag);
+static void seed_rng_from_entropy(void);
 
 static void load_ui_font_tiles(void)
 {
@@ -332,9 +333,7 @@ static void start_new_round(void)
 {
     /* Ensure RNG is valid, then begin a new paid hand. */
     if (!rng_seeded) {
-        uint16_t seed = (uint16_t)(entropy | 1);
-        rand8_seed(seed);
-        rng_seeded = 1;
+        seed_rng_from_entropy();
     }
 
     if (credits == 0 || credits < bet) {
@@ -352,17 +351,19 @@ static void start_new_round(void)
     suppress_enter_ticks = 8;
 }
 
-static void seed_rng_from_time(void)
+static void seed_rng_from_entropy(void)
 {
-    /* Initial seeding at startup from system time and entropy accumulator. */
+    /*
+     * One-time seed from accumulated entropy plus current clock.
+     * Called on first real hand start so player timing can contribute.
+     */
     zos_time_t now;
-    uint16_t seed = 1;
+    uint16_t seed = entropy;
 
     if (gettime(0, &now) == ERR_SUCCESS) {
-        seed = (uint16_t)(now.t_millis ^ entropy);
-    } else {
-        seed = entropy;
+        seed ^= now.t_millis;
     }
+    seed ^= (uint16_t)(entropy_tick << 1);
 
     if ((seed & 1U) == 0) {
         seed++;
@@ -652,8 +653,10 @@ void init(void)
     clear_layers();
     render_table();
 
-    seed_rng_from_time();
-    shuffle_deck();
+    /*
+     * RNG is intentionally not seeded/shuffled here.
+     * First real hand start (`start_new_round`) performs one-time seeding.
+     */
     rewards_reset();
     show_card_faces = 0;
     start_reveal_sequence(all_slots, CARD_COUNT, 0);
