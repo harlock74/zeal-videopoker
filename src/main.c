@@ -47,6 +47,8 @@ char win_banner_text[36] = "YOU HAVE WON!";
 
 /* Small entropy accumulator mixed into RNG seed values. */
 uint16_t entropy = 1;
+/* Frame tick used to fold player timing jitter into entropy. */
+static uint16_t entropy_tick = 0;
 static uint8_t rng_seeded = 0;
 static uint8_t reveal_slots[CARD_COUNT];
 static uint8_t reveal_len = 0;
@@ -114,6 +116,8 @@ static void render_splash_screen(void);
 static void poll_keys(KeyEvents* ev);
 static void print_error_u16(const char* prefix, uint16_t value);
 static void show_reward_bitmap_blocking(uint8_t stage);
+static void mix_entropy_u16(uint16_t value);
+static void entropy_event(uint8_t tag);
 
 static void load_ui_font_tiles(void)
 {
@@ -678,6 +682,33 @@ static void print_error_u16(const char* prefix, uint16_t value)
     put_c('\n');
 }
 
+static void mix_entropy_u16(uint16_t value)
+{
+    /* Small avalanche-style mixer, cheap enough for this target. */
+    entropy ^= value;
+    entropy = (uint16_t)(entropy * 109U + 89U);
+    entropy ^= (uint16_t)(entropy >> 7);
+    entropy ^= (uint16_t)(entropy << 9);
+
+    if (entropy == 0U) {
+        entropy = 1U;
+    }
+}
+
+static void entropy_event(uint8_t tag)
+{
+    /*
+     * Prefer human timing jitter (entropy_tick at event time) and current
+     * gameplay state. Avoid deriving entropy from PRNG-generated values.
+     */
+    uint16_t sample = entropy_tick;
+    sample ^= (uint16_t)((uint16_t)tag << 8);
+    sample ^= (uint16_t)(credits << 1);
+    sample ^= (uint16_t)((uint16_t)bet << 10);
+    sample ^= win_amount;
+    mix_entropy_u16(sample);
+}
+
 void update(void)
 {
     /* Game logic tick: input/state transitions only (no VRAM drawing here). */
@@ -685,8 +716,23 @@ void update(void)
     sound_loop();
     tick_current_music();
     update_reveal_sequence();
+    entropy_tick++;
     poll_keys(&ev);
     entropy++;
+
+    /* Mix entropy from user-driven timing events this tick. */
+    if (ev.up) { entropy_event(1U); }
+    if (ev.down) { entropy_event(2U); }
+    if (ev.enter) { entropy_event(3U); }
+    if (ev.space) { entropy_event(4U); }
+    if (ev.toggle_audio_mode) { entropy_event(5U); }
+    if (ev.quit) { entropy_event(6U); }
+    for (uint8_t i = 0; i < CARD_COUNT; i++) {
+        if (ev.hold_toggle[i]) {
+            entropy_event((uint8_t)(10U + i));
+        }
+    }
+
     if (suppress_enter_ticks > 0) {
         suppress_enter_ticks--;
     }

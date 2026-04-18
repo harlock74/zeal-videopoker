@@ -137,5 +137,4 @@ void play_card_place_sound(void)
     if (tap != NULL) {
         tap->waveform = CARD_SFX_WAVEFORM;
     }
-    entropy ^= (uint16_t)(freq << 1);
 }
