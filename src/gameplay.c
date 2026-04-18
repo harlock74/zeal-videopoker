@@ -61,6 +61,33 @@ static uint8_t is_royal(const uint8_t ranks[13])
     return ranks[0] && ranks[9] && ranks[10] && ranks[11] && ranks[12];
 }
 
+/* Returns an unbiased random value in [0, max_inclusive]. */
+static uint8_t rand_bounded_u8(uint8_t max_inclusive)
+{
+    uint8_t range = (uint8_t)(max_inclusive + 1U);
+    uint8_t limit;
+    uint8_t x;
+
+    /*
+     * Defensive overflow guard if called with 255 (not expected in this game):
+     * 255 + 1 wraps to 0 in uint8_t.
+     */
+    if (range == 0U) {
+        return 0U;
+    }
+
+    /*
+     * Rejection sampling removes modulo bias:
+     * accept only 0..limit where (limit + 1) is a multiple of range.
+     */
+    limit = (uint8_t)(255U - (255U % range));
+    do {
+        x = rand8();
+    } while (x > limit);
+
+    return (uint8_t)(x % range);
+}
+
 void shuffle_deck(void)
 {
     /* Fisher-Yates shuffle over full 52-card deck. */
@@ -69,7 +96,7 @@ void shuffle_deck(void)
     }
 
     for (uint8_t i = DECK_SIZE - 1; i > 0; i--) {
-        uint8_t j = rand8() % (i + 1);
+        uint8_t j = rand_bounded_u8(i);
         uint8_t tmp = deck[i];
         deck[i] = deck[j];
         deck[j] = tmp;
