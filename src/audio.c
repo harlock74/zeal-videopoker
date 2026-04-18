@@ -1,14 +1,14 @@
 #include <stdint.h>
 
+#include "audio.h"
+
 #include <zvb_sound.h>
 #include <zgdk.h>
 #include <zgdk/sound/tracker.h>
 #include <core.h>
 
-#include "main.h"
 #include "app_state.h"
 #include "assets.h"
-#include "audio.h"
 
 /* Keep audio tuning local to the audio module. */
 #define CARD_SOUND 0
