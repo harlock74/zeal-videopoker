@@ -69,7 +69,7 @@ void shuffle_deck(void)
     }
 
     for (uint8_t i = DECK_SIZE - 1; i > 0; i--) {
-        uint8_t j = rand8_quick() % (i + 1);
+        uint8_t j = rand8() % (i + 1);
         uint8_t tmp = deck[i];
         deck[i] = deck[j];
         deck[j] = tmp;
