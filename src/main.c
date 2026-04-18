@@ -491,7 +491,6 @@ static void return_to_bet_phase(void)
     suppress_enter_ticks = 8;
     needs_redraw = 1;
     needs_hud_redraw = 0;
-    rewards_clear_pending();
     reward_final_prompt_armed = 0;
 }
 
