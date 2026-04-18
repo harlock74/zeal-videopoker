@@ -99,7 +99,6 @@ const uint8_t credit_y = 17;
 
 static void restart_if_credit_low(void);
 static void return_to_bet_phase(void);
-static void reseed_rng_for_new_hand(void);
 static void start_reveal_sequence(const uint8_t* slots, uint8_t len, uint8_t initial_mask);
 static void update_reveal_sequence(void);
 static void set_win_banner_from_result(const HandResult* result);
@@ -340,11 +339,10 @@ static void start_new_round(void)
         return;
     }
 
-    /* At hand start: take bet, clear previous win, reseed + reshuffle, deal. */
+    /* At hand start: take bet, clear previous win, reshuffle, deal. */
     credits -= bet;
     win_amount = 0;
     show_win_banner = 0;
-    reseed_rng_for_new_hand();
     shuffle_deck();
     deal_hand();
     suppress_enter_ticks = 8;
@@ -360,27 +358,6 @@ static void seed_rng_from_time(void)
         seed = (uint16_t)(now.t_millis ^ entropy);
     } else {
         seed = entropy;
-    }
-
-    if ((seed & 1U) == 0) {
-        seed++;
-    }
-
-    rand8_seed(seed);
-    rng_seeded = 1;
-}
-
-static void reseed_rng_for_new_hand(void)
-{
-    /*
-     * Per-hand reseed to avoid repeating sequences between hands.
-     * Mixes entropy, bankroll, bet, previous win, and current clock millis.
-     */
-    zos_time_t now;
-    uint16_t seed = (uint16_t)(entropy ^ ((uint16_t)credits << 3) ^ ((uint16_t)bet << 9) ^ win_amount);
-
-    if (gettime(0, &now) == ERR_SUCCESS) {
-        seed ^= now.t_millis;
     }
 
     if ((seed & 1U) == 0) {
