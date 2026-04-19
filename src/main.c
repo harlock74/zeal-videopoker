@@ -361,7 +361,10 @@ static void seed_rng_from_entropy(void)
 
     seed ^= (uint16_t)(entropy_tick << 1);
 
-    if ((seed & 1U) == 0) {
+    /* rand8_seed must never receive 0; keep seed non-zero and odd. */
+    if (seed == 0U) {
+        seed = 1U;
+    } else if ((seed & 1U) == 0U) {
         seed++;
     }
 
