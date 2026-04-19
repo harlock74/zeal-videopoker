@@ -720,7 +720,6 @@ void update(void)
     update_reveal_sequence();
     entropy_tick++;
     poll_keys(&ev);
-    entropy++;
 
     /* Mix entropy from user-driven timing events this tick. */
     if (ev.up) { entropy_event(1U); }
