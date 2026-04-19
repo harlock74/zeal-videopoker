@@ -2,7 +2,6 @@
 #include <stdint.h>
 
 #include <zos_sys.h>
-#include <zos_time.h>
 #include <zos_video.h>
 #include <zos_vfs.h>
 #include <zos_keyboard.h>
@@ -354,15 +353,12 @@ static void start_new_round(void)
 static void seed_rng_from_entropy(void)
 {
     /*
-     * One-time seed from accumulated entropy plus current clock.
+     * One-time seed from accumulated interaction/tick entropy only
+     * (RTC-independent).
      * Called on first real hand start so player timing can contribute.
      */
-    zos_time_t now;
     uint16_t seed = entropy;
 
-    if (gettime(0, &now) == ERR_SUCCESS) {
-        seed ^= now.t_millis;
-    }
     seed ^= (uint16_t)(entropy_tick << 1);
 
     if ((seed & 1U) == 0) {
