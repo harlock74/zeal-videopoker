@@ -4,7 +4,6 @@
 #include <zos_sys.h>
 #include <zos_video.h>
 #include <zos_vfs.h>
-#include <zos_keyboard.h>
 #include <zvb_gfx.h>
 #include <zvb_sound.h>
 #include <zgdk.h>
@@ -17,6 +16,7 @@
 #include "gameplay.h"
 #include "render.h"
 #include "rewards.h"
+#include "input.h"
 
 #define CARD_REVEAL_DELAY 4
 #define CONST_STR_LEN(arr) ((uint8_t)(sizeof(arr) - 1U))
@@ -40,6 +40,7 @@ uint16_t win_amount = 0;
 /* UI state flags. */
 uint8_t show_win_banner = 0;
 uint8_t show_card_faces = 0;
+uint8_t selected_hold_slot = 0;
 static uint8_t needs_redraw = 1;
 static uint8_t needs_hud_redraw = 0;
 char win_banner_text[36] = "YOU HAVE WON!";
@@ -65,20 +66,9 @@ static uint8_t draw_hand_slots_buf[CARD_COUNT];
 char hud_num_buf[6];
 uint8_t g_buf[SHARED_SCRATCH_BUF_SIZE];
 
-/* Snapshot of key events for one update tick. */
-typedef struct {
-    uint8_t up;
-    uint8_t down;
-    uint8_t enter;
-    uint8_t space;
-    uint8_t quit;
-    uint8_t toggle_audio_mode;
-    uint8_t hold_toggle[CARD_COUNT];
-} KeyEvents;
-
-/* Debounce timer to avoid Enter/Space double-triggering state transitions. */
+/* Debounce timer to avoid confirm buttons double-triggering state transitions. */
 static uint8_t suppress_enter_ticks = 0;
-/* Requires Enter/Space release before accepting next confirm action. */
+/* Requires confirm-button release before accepting next confirm action. */
 static uint8_t confirm_armed = 0;
 
 /* Position of each playable card slot (top-left tile of 3x4 card). */
@@ -112,7 +102,6 @@ static void draw_splash_prompt(uint8_t visible);
 static void draw_splash_chip_block(uint8_t x, uint8_t y, uint8_t chip_tl, uint8_t chip_tr, uint8_t chip_bl, uint8_t chip_br);
 static void draw_splash_border(void);
 static void render_splash_screen(void);
-static void poll_keys(KeyEvents* ev);
 static void print_error_u16(const char* prefix, uint16_t value);
 static void show_reward_bitmap_blocking(uint8_t stage);
 static void mix_entropy_u16(uint16_t value);
@@ -281,6 +270,7 @@ void deal_hand(void)
     }
 
     show_card_faces = 1;
+    selected_hold_slot = 0;
     state = STATE_HOLD;
     start_reveal_sequence(all_slots, CARD_COUNT, 0);
     needs_redraw = 1;
@@ -314,7 +304,7 @@ void draw_hand(void)
     }
     /*
      * Keep final hand visible in RESULT phase so player can inspect outcome.
-     * Next Enter/Space returns to BET and shows backs again.
+     * Next confirm returns to BET and shows backs again.
      */
     show_card_faces = 1;
     show_win_banner = (win_amount > 0);
@@ -412,7 +402,7 @@ static void update_reveal_sequence(void)
 static void restart_if_credit_low(void)
 {
     /*
-     * Credit exhausted: show explicit banner and wait for Enter/Space before
+     * Credit exhausted: show explicit banner and wait for confirm before
      * returning to splash. Keep the current hand visible meanwhile.
      */
     if (credits > 0) {
@@ -460,6 +450,7 @@ static void perform_bankrupt_reset_with_splash(void)
     win_amount = 0;
     show_win_banner = 0;
     show_card_faces = 0;
+    selected_hold_slot = 0;
     reveal_active = 0;
     start_reveal_sequence(all_slots, CARD_COUNT, 0);
     suppress_enter_ticks = 8;
@@ -484,6 +475,7 @@ static void return_to_bet_phase(void)
 
     show_win_banner = 0;
     show_card_faces = 0;
+    selected_hold_slot = 0;
     reveal_active = 0;
     start_reveal_sequence(all_slots, CARD_COUNT, 0);
     state = STATE_BET;
@@ -499,7 +491,7 @@ static void show_reward_bitmap_blocking(uint8_t stage)
     /*
      * Reward screen flow:
      * - Switch to bitmap mode and load rewards image assets from disk
-     * - Wait for Enter/Space (with release gate to avoid instant auto-close)
+     * - Wait for confirm (with release gate to avoid instant auto-close)
      * - Restore normal poker graphics mode and redraw current game state
      */
     uint8_t enter_or_space_released = 0;
@@ -525,15 +517,15 @@ static void show_reward_bitmap_blocking(uint8_t stage)
 
     while (1) {
         KeyEvents ev;
-        poll_keys(&ev);
+        input_poll_events(&ev);
         sound_loop();
         tick_current_music();
 
-        if (!ev.enter && !ev.space) {
+        if (!ev.start && !ev.action) {
             enter_or_space_released = 1;
         }
 
-        if (enter_or_space_released && (ev.enter || ev.space)) {
+        if (enter_or_space_released && (ev.start || ev.action)) {
             break;
         }
 
@@ -561,60 +553,10 @@ restore_game_mode:
     gfx_enable_screen(1);
 }
 
-static void poll_keys(KeyEvents* ev)
-{
-    /*
-     * Read all pending keyboard bytes this tick and convert to one-shot events.
-     * KB_RELEASED marker is skipped so hold toggles happen on press only.
-     */
-    uint8_t* buf = g_buf;
-    uint8_t released = 0;
-
-    mem_set(ev, 0, sizeof(*ev));
-
-    while (1) {
-        uint16_t size = 8;
-        if (read(DEV_STDIN, buf, &size) != ERR_SUCCESS || size == 0) {
-            break;
-        }
-
-        for (uint16_t i = 0; i < size; i++) {
-            uint8_t key = buf[i];
-            if (key == KB_RELEASED) {
-                released = 1;
-                continue;
-            }
-            if (released) {
-                released = 0;
-                continue;
-            }
-
-            switch (key) {
-                case KB_UP_ARROW: ev->up = 1; break;
-                case KB_DOWN_ARROW: ev->down = 1; break;
-                case KB_KEY_ENTER: ev->enter = 1; break;
-                case KB_KEY_SPACE: ev->space = 1; break;
-                case KB_KEY_A: ev->hold_toggle[0] = 1; break;
-                case KB_KEY_S: ev->hold_toggle[1] = 1; break;
-                case KB_KEY_D: ev->hold_toggle[2] = 1; break;
-                case KB_KEY_F: ev->hold_toggle[3] = 1; break;
-                case KB_KEY_G: ev->hold_toggle[4] = 1; break;
-                case KB_KEY_P: ev->toggle_audio_mode = 1; break;
-                case KB_RIGHT_SHIFT:
-                case KB_KEY_QUOTE:
-                    ev->quit = 1;
-                    break;
-                default:
-                    break;
-            }
-        }
-    }
-}
-
 void init(void)
 {
     /* Initialize input, graphics mode, assets, then block on splash screen. */
-    zos_err_t err = input_init(true);
+    zos_err_t err = input_events_init();
     if (err != ERR_SUCCESS) {
         print_error_u16("Input init failed: ", err);
         exit(1);
@@ -660,6 +602,7 @@ void init(void)
     show_card_faces = 0;
     start_reveal_sequence(all_slots, CARD_COUNT, 0);
     state = STATE_BET;
+    selected_hold_slot = 0;
     suppress_enter_ticks = 8;
     confirm_armed = 0;
     render_cards();
@@ -718,26 +661,23 @@ void update(void)
     tick_current_music();
     update_reveal_sequence();
     entropy_tick++;
-    poll_keys(&ev);
+    input_poll_events(&ev);
 
     /* Mix entropy from user-driven timing events this tick. */
     if (ev.up) { entropy_event(1U); }
     if (ev.down) { entropy_event(2U); }
-    if (ev.enter) { entropy_event(3U); }
-    if (ev.space) { entropy_event(4U); }
+    if (ev.start) { entropy_event(3U); }
+    if (ev.action) { entropy_event(4U); }
     if (ev.toggle_audio_mode) { entropy_event(5U); }
     if (ev.quit) { entropy_event(6U); }
-    for (uint8_t i = 0; i < CARD_COUNT; i++) {
-        if (ev.hold_toggle[i]) {
-            entropy_event((uint8_t)(10U + i));
-        }
-    }
+    if (ev.left) { entropy_event(7U); }
+    if (ev.right) { entropy_event(8U); }
 
     if (suppress_enter_ticks > 0) {
         suppress_enter_ticks--;
     }
-    /* Re-arm confirm only after Enter/Space are fully released. */
-    if (!ev.enter && !ev.space) {
+    /* Re-arm confirm only after Start/Enter and B/Space are fully released. */
+    if (!ev.start && !ev.action) {
         confirm_armed = 1;
     }
 
@@ -749,9 +689,9 @@ void update(void)
     if (pending_bankrupt_reset) {
         /*
          * Game-over confirmation gate:
-         * only Enter/Space moves back to splash screen and restarts bankroll.
+         * only Start/Enter or B/Space moves back to splash screen and restarts bankroll.
          */
-        if ((ev.enter || ev.space) && suppress_enter_ticks == 0 && confirm_armed) {
+        if ((ev.start || ev.action) && suppress_enter_ticks == 0 && confirm_armed) {
             confirm_armed = 0;
             perform_bankrupt_reset_with_splash();
         }
@@ -766,14 +706,19 @@ void update(void)
         if (reveal_active) {
             return;
         }
-        /* Toggle holds with A/S/D/F/G; Enter performs draw. */
-        for (uint8_t i = 0; i < CARD_COUNT; i++) {
-            if (ev.hold_toggle[i]) {
-                cards[i].held ^= 1;
-                needs_hud_redraw = 1;
-            }
+        if (ev.left) {
+            selected_hold_slot = (selected_hold_slot == 0) ? (CARD_COUNT - 1) : (uint8_t)(selected_hold_slot - 1);
+            needs_hud_redraw = 1;
         }
-        if (ev.enter && suppress_enter_ticks == 0 && confirm_armed) {
+        if (ev.right) {
+            selected_hold_slot = (selected_hold_slot >= (CARD_COUNT - 1)) ? 0 : (uint8_t)(selected_hold_slot + 1);
+            needs_hud_redraw = 1;
+        }
+        if (ev.action) {
+            cards[selected_hold_slot].held ^= 1;
+            needs_hud_redraw = 1;
+        }
+        if (ev.start && suppress_enter_ticks == 0 && confirm_armed) {
             confirm_armed = 0;
             draw_hand();
         }
@@ -785,7 +730,7 @@ void update(void)
             /*
              * Reward display is part of this result hand and should only appear
              * after the player confirms from the win/result banner.
-             * Keep RESULT locked until reveal is finished and Enter/Space is
+             * Keep RESULT locked until reveal is finished and confirm is
              * pressed, then show the reward screen as the surprise moment.
              */
             if (reveal_active) {
@@ -800,7 +745,7 @@ void update(void)
                 return;
             }
 
-            if (suppress_enter_ticks == 0 && confirm_armed && (ev.enter || ev.space)) {
+            if (suppress_enter_ticks == 0 && confirm_armed && (ev.start || ev.action)) {
                 uint8_t reward_stage = rewards_consume_pending_stage();
                 confirm_armed = 0;
                 show_win_banner = 0;
@@ -822,11 +767,11 @@ void update(void)
 
         /* RESULT waits for confirmation before returning to BET phase. */
         if (suppress_enter_ticks == 0) {
-            if (!pending_bankrupt_reset && show_win_banner && (ev.up || ev.down || ev.enter || ev.space)) {
+            if (!pending_bankrupt_reset && show_win_banner && (ev.up || ev.down || ev.start || ev.action)) {
                 show_win_banner = 0;
                 needs_hud_redraw = 1;
             }
-            if ((ev.enter || ev.space) && confirm_armed) {
+            if ((ev.start || ev.action) && confirm_armed) {
                 confirm_armed = 0;
                 return_to_bet_phase();
             }
@@ -835,8 +780,8 @@ void update(void)
     }
 
     if (state == STATE_BET) {
-        /* BET phase: adjust bet with arrows, then Enter/Space to deal. */
-        if (show_win_banner && (ev.up || ev.down || ev.enter || ev.space)) {
+        /* BET phase: adjust bet with arrows, then confirm to deal. */
+        if (show_win_banner && (ev.up || ev.down || ev.start || ev.action)) {
             show_win_banner = 0;
             needs_hud_redraw = 1;
         }
@@ -849,7 +794,7 @@ void update(void)
             bet--;
             needs_hud_redraw = 1;
         }
-        if ((ev.enter || ev.space) && suppress_enter_ticks == 0 && confirm_armed && credits >= bet) {
+        if ((ev.start || ev.action) && suppress_enter_ticks == 0 && confirm_armed && credits >= bet) {
             confirm_armed = 0;
             start_new_round();
         }

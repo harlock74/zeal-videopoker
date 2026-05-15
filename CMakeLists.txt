@@ -39,6 +39,7 @@ configure_file(
 
 add_executable(${target_name}
     src/main.c
+    src/input.c
     src/audio.c
     src/splash.c
     src/gameplay.c

@@ -24,6 +24,7 @@ extern uint16_t win_amount;
 
 extern uint8_t show_win_banner;
 extern uint8_t show_card_faces;
+extern uint8_t selected_hold_slot;
 extern uint8_t pending_bankrupt_reset;
 
 extern uint16_t entropy;

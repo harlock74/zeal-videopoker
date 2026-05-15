@@ -4,7 +4,7 @@
 #include "main.h"
 
 void place_tile_grid_at(uint8_t x0, uint8_t y0, const uint8_t grid[SRC_CARD_H][SRC_CARD_W]);
-void draw_hold_frames(void);
+void draw_selector_frame(void);
 void draw_hold_labels(void);
 void draw_hud_values(void);
 void render_mark_all_slots_dirty(void);

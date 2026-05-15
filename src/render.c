@@ -26,11 +26,11 @@ static void clear_overlay_rect(uint8_t x, uint8_t y, uint8_t width, uint8_t heig
     tilemap_fill(&vctx, CARD_LAYER, EMPTY_TILE, x, y, width, height);
 }
 
-void draw_hold_frames(void)
+void draw_selector_frame(void)
 {
-    /* Draw/remove a 1-tile border around each card slot based on hold flag. */
+    /* Draw/remove the 1-tile cursor border around the selected card only. */
     for (uint8_t i = 0; i < CARD_COUNT; i++) {
-        uint8_t show_frame = (state == STATE_HOLD) && cards[i].held;
+        uint8_t show_frame = (state == STATE_HOLD) && (i == selected_hold_slot);
         uint8_t x0 = (uint8_t)(slot_x[i] - 1);
         uint8_t y0 = (uint8_t)(slot_y - 1);
         uint8_t x1 = (uint8_t)(slot_x[i] + SRC_CARD_W);
@@ -38,8 +38,8 @@ void draw_hold_frames(void)
 
         for (uint8_t x = x0; x <= x1; x++) {
             if (show_frame) {
-                gfx_tilemap_place(&vctx, HOLD_FRAME_TILE, CARD_LAYER, x, y0);
-                gfx_tilemap_place(&vctx, HOLD_FRAME_TILE, CARD_LAYER, x, y1);
+                gfx_tilemap_place(&vctx, SELECTOR_FRAME_TILE, CARD_LAYER, x, y0);
+                gfx_tilemap_place(&vctx, SELECTOR_FRAME_TILE, CARD_LAYER, x, y1);
             } else {
                 clear_overlay_cell(x, y0);
                 clear_overlay_cell(x, y1);
@@ -48,8 +48,8 @@ void draw_hold_frames(void)
 
         for (uint8_t y = (uint8_t)(y0 + 1); y < y1; y++) {
             if (show_frame) {
-                gfx_tilemap_place(&vctx, HOLD_FRAME_TILE, CARD_LAYER, x0, y);
-                gfx_tilemap_place(&vctx, HOLD_FRAME_TILE, CARD_LAYER, x1, y);
+                gfx_tilemap_place(&vctx, SELECTOR_FRAME_TILE, CARD_LAYER, x0, y);
+                gfx_tilemap_place(&vctx, SELECTOR_FRAME_TILE, CARD_LAYER, x1, y);
             } else {
                 clear_overlay_cell(x0, y);
                 clear_overlay_cell(x1, y);
@@ -199,7 +199,7 @@ void render_table(void)
 void render_refresh_overlays(void)
 {
     draw_hud_values();
-    draw_hold_frames();
+    draw_selector_frame();
     draw_hold_labels();
 }
 

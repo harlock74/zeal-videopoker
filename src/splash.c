@@ -2,8 +2,6 @@
 #include <stdlib.h>
 
 #include <zos_sys.h>
-#include <zos_vfs.h>
-#include <zos_keyboard.h>
 #include <zvb_gfx.h>
 #include <zgdk.h>
 
@@ -11,10 +9,7 @@
 #include "app_state.h"
 #include "audio.h"
 #include "splash.h"
-
-/* Static input buffers reduce stack usage in splash loop on SDCC. */
-static uint8_t g_splash_read_buf[32];
-static uint8_t g_splash_release_buf[16];
+#include "input.h"
 
 /* Keep splash prompt cadence local to the splash module. */
 static const uint8_t kSplashBlinkFrames = 24;
@@ -25,29 +20,24 @@ void splash_run_blocking(void (*draw_prompt)(uint8_t visible))
     uint8_t prompt_visible = 1;
 
     /* Start from a clean input state so first press is always accepted. */
-    keyboard_flush();
-    controller_flush();
+    input_events_flush();
 
     start_splash_music();
 
     while (1) {
-        uint16_t size = sizeof(g_splash_read_buf);
+        KeyEvents ev;
 
         sound_loop();
         tick_current_music();
         entropy++;
+        input_poll_events(&ev);
 
-        if (read(DEV_STDIN, g_splash_read_buf, &size) == ERR_SUCCESS && size > 0) {
-            for (uint16_t i = 0; i < size; i++) {
-                uint8_t key = g_splash_read_buf[i];
-                if (key == KB_KEY_ENTER || key == KB_KEY_SPACE) {
-                    goto splash_pressed;
-                }
-                if (key == KB_KEY_QUOTE || key == KB_RIGHT_SHIFT) {
-                    deinit();
-                    exit(0);
-                }
-            }
+        if (ev.start || ev.action) {
+            goto splash_pressed;
+        }
+        if (ev.quit) {
+            deinit();
+            exit(0);
         }
 
         gfx_wait_vblank(&vctx);
@@ -65,24 +55,15 @@ splash_pressed:
     stop_current_music();
     msleep(40);
     while (1) {
-        uint16_t size = sizeof(g_splash_release_buf);
-        uint8_t held = 0;
+        KeyEvents ev;
 
-        if (read(DEV_STDIN, g_splash_release_buf, &size) == ERR_SUCCESS && size > 0) {
-            for (uint16_t i = 0; i < size; i++) {
-                if (g_splash_release_buf[i] == KB_KEY_ENTER || g_splash_release_buf[i] == KB_KEY_SPACE) {
-                    held = 1;
-                    break;
-                }
-            }
-        }
-        if (!held) {
+        input_poll_events(&ev);
+        if (!ev.start && !ev.action) {
             break;
         }
         gfx_wait_vblank(&vctx);
         gfx_wait_end_vblank(&vctx);
     }
 
-    keyboard_flush();
-    controller_flush();
+    input_events_flush();
 }

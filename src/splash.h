@@ -2,5 +2,5 @@
 
 #include <stdint.h>
 
-/* Blocks on splash until Enter/Space is pressed, with blinking prompt callback. */
+/* Blocks on splash until Start/Enter or B/Space is pressed, with blinking prompt callback. */
 void splash_run_blocking(void (*draw_prompt)(uint8_t visible));
