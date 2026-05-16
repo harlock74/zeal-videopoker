@@ -494,7 +494,7 @@ static void show_reward_bitmap_blocking(uint8_t stage)
      * - Wait for confirm (with release gate to avoid instant auto-close)
      * - Restore normal poker graphics mode and redraw current game state
      */
-    uint8_t enter_or_space_released = 0;
+    uint8_t confirm_released = 0;
 
     /*
      * Reward asset loading can take multiple frames; stop tracker/audio first
@@ -521,11 +521,11 @@ static void show_reward_bitmap_blocking(uint8_t stage)
         sound_loop();
         tick_current_music();
 
-        if (!ev.start && !ev.action) {
-            enter_or_space_released = 1;
+        if (!ev.confirm) {
+            confirm_released = 1;
         }
 
-        if (enter_or_space_released && (ev.start || ev.action)) {
+        if (confirm_released && ev.confirm) {
             break;
         }
 
@@ -667,17 +667,18 @@ void update(void)
     if (ev.up) { entropy_event(1U); }
     if (ev.down) { entropy_event(2U); }
     if (ev.start) { entropy_event(3U); }
-    if (ev.action) { entropy_event(4U); }
+    if (ev.confirm) { entropy_event(4U); }
     if (ev.toggle_audio_mode) { entropy_event(5U); }
     if (ev.quit) { entropy_event(6U); }
     if (ev.left) { entropy_event(7U); }
     if (ev.right) { entropy_event(8U); }
+    if (ev.hold) { entropy_event(9U); }
 
     if (suppress_enter_ticks > 0) {
         suppress_enter_ticks--;
     }
-    /* Re-arm confirm only after Start/Enter and B/Space are fully released. */
-    if (!ev.start && !ev.action) {
+    /* Re-arm confirm only after B/Space/Z and Start/Enter are fully released. */
+    if (!ev.confirm && !ev.start) {
         confirm_armed = 1;
     }
 
@@ -689,9 +690,9 @@ void update(void)
     if (pending_bankrupt_reset) {
         /*
          * Game-over confirmation gate:
-         * only Start/Enter or B/Space moves back to splash screen and restarts bankroll.
+         * only Start/Enter moves back to splash screen and restarts bankroll.
          */
-        if ((ev.start || ev.action) && suppress_enter_ticks == 0 && confirm_armed) {
+        if (ev.start && suppress_enter_ticks == 0 && confirm_armed) {
             confirm_armed = 0;
             perform_bankrupt_reset_with_splash();
         }
@@ -714,11 +715,11 @@ void update(void)
             selected_hold_slot = (selected_hold_slot >= (CARD_COUNT - 1)) ? 0 : (uint8_t)(selected_hold_slot + 1);
             needs_hud_redraw = 1;
         }
-        if (ev.action) {
+        if (ev.hold) {
             cards[selected_hold_slot].held ^= 1;
             needs_hud_redraw = 1;
         }
-        if (ev.start && suppress_enter_ticks == 0 && confirm_armed) {
+        if (ev.confirm && suppress_enter_ticks == 0 && confirm_armed) {
             confirm_armed = 0;
             draw_hand();
         }
@@ -745,7 +746,7 @@ void update(void)
                 return;
             }
 
-            if (suppress_enter_ticks == 0 && confirm_armed && (ev.start || ev.action)) {
+            if (suppress_enter_ticks == 0 && confirm_armed && ev.confirm) {
                 uint8_t reward_stage = rewards_consume_pending_stage();
                 confirm_armed = 0;
                 show_win_banner = 0;
@@ -767,11 +768,11 @@ void update(void)
 
         /* RESULT waits for confirmation before returning to BET phase. */
         if (suppress_enter_ticks == 0) {
-            if (!pending_bankrupt_reset && show_win_banner && (ev.up || ev.down || ev.start || ev.action)) {
+            if (!pending_bankrupt_reset && show_win_banner && (ev.up || ev.down || ev.start || ev.confirm)) {
                 show_win_banner = 0;
                 needs_hud_redraw = 1;
             }
-            if ((ev.start || ev.action) && confirm_armed) {
+            if (ev.confirm && confirm_armed) {
                 confirm_armed = 0;
                 return_to_bet_phase();
             }
@@ -781,7 +782,7 @@ void update(void)
 
     if (state == STATE_BET) {
         /* BET phase: adjust bet with arrows, then confirm to deal. */
-        if (show_win_banner && (ev.up || ev.down || ev.start || ev.action)) {
+        if (show_win_banner && (ev.up || ev.down || ev.start || ev.confirm)) {
             show_win_banner = 0;
             needs_hud_redraw = 1;
         }
@@ -794,7 +795,7 @@ void update(void)
             bet--;
             needs_hud_redraw = 1;
         }
-        if ((ev.start || ev.action) && suppress_enter_ticks == 0 && confirm_armed && credits >= bet) {
+        if (ev.confirm && suppress_enter_ticks == 0 && confirm_armed && credits >= bet) {
             confirm_armed = 0;
             start_new_round();
         }

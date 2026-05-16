@@ -64,7 +64,8 @@ void input_poll_events(KeyEvents* ev)
     ev->down = (pressed_input & BUTTON_DOWN) ? EVENT_PRESSED : EVENT_NOT_PRESSED;
     ev->left = (pressed_input & BUTTON_LEFT) ? EVENT_PRESSED : EVENT_NOT_PRESSED;
     ev->right = (pressed_input & BUTTON_RIGHT) ? EVENT_PRESSED : EVENT_NOT_PRESSED;
-    ev->action = (pressed_input & BUTTON_B) ? EVENT_PRESSED : EVENT_NOT_PRESSED;
+    ev->confirm = (pressed_input & BUTTON_B) ? EVENT_PRESSED : EVENT_NOT_PRESSED;
+    ev->hold = (pressed_input & BUTTON_A) ? EVENT_PRESSED : EVENT_NOT_PRESSED;
     ev->start = (pressed_input & BUTTON_START) ? EVENT_PRESSED : EVENT_NOT_PRESSED;
     ev->quit = (pressed_input & BUTTON_SELECT) ? EVENT_PRESSED : EVENT_NOT_PRESSED;
     ev->toggle_audio_mode = (pressed_input & BUTTON_X) ? EVENT_PRESSED : EVENT_NOT_PRESSED;

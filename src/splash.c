@@ -32,7 +32,7 @@ void splash_run_blocking(void (*draw_prompt)(uint8_t visible))
         entropy++;
         input_poll_events(&ev);
 
-        if (ev.start || ev.action) {
+        if (ev.start) {
             goto splash_pressed;
         }
         if (ev.quit) {
@@ -58,7 +58,7 @@ splash_pressed:
         KeyEvents ev;
 
         input_poll_events(&ev);
-        if (!ev.start && !ev.action) {
+        if (!ev.start) {
             break;
         }
         gfx_wait_vblank(&vctx);

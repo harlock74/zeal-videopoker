@@ -17,26 +17,27 @@ zeal-videopoker contains sound effects and background music composed with Zeal M
 ## Controls
 
 - `UP` / `DOWN`: increase/decrease bet (bet phase)
-- `A` / `S` / `D` / `F` / `G`: hold/unhold cards from 1 to 5 (hold phase)
-- `ENTER` or `SPACE`: deal, draw, continue after winning a poker hand
-- `P`: toggle gameplay audio mode
+- `LEFT` / `RIGHT`: move between cards during hold selection
+- `SPACE` / `Z` or SNES `B`: deal, draw, continue after winning a poker hand
+- `X` or SNES `A`: hold/unhold the selected card
+- `ENTER` or SNES `START`: start/restart the game
+- `S` or SNES `X`: toggle gameplay audio mode
   - `music-only` (default): gameplay tracker music on, card placement SFX muted
   - `card-SFX-only`: gameplay tracker music paused, card placement SFX enabled
-- `'`: quit
+- `R SHIFT` or SNES `SELECT`: quit
 
 ## Game Flow
 
 1. **Bet phase (`DEAL`)**
    - Adjust bet with `UP` / `DOWN`.
-   - Press `ENTER` or `SPACE` to start the hand.
-   - Confirm actions are release-gated (fresh press required) to avoid accidental auto-deal.
+   - Press `SPACE` / `Z` or SNES `B` to deal.
    - Selected bet is subtracted from credits.
 2. **Hold phase (`DRAW`)**
    - Five cards are dealt from a shuffled 52-card deck.
-   - Toggle hold with `A/S/D/F/G` (cards 1 to 5).
-   - Held cards are marked with `HOLD` and a visual frame.
-   - Press `ENTER` to draw replacements.
-   - Confirm actions are release-gated (fresh press required) to avoid accidental auto-draw.
+   - Move the selection with `LEFT` / `RIGHT`.
+   - Toggle hold on the selected card with `X` or SNES `A`.
+   - Held cards are marked with `HOLD`; the frame is only the current selector.
+   - Press `SPACE` / `Z` or SNES `B` to draw replacements.
 3. **Result phase**
    - Only non-held cards are replaced.
    - Final hand is evaluated against the pay table.
@@ -44,14 +45,14 @@ zeal-videopoker contains sound effects and background music composed with Zeal M
    - `CREDIT` is updated and the banner shows the exact winning combo:
      - Example: `STRAIGHT X4: YOU HAVE WON!`
 4. **Back to bet**
-   - Press `ENTER` or `SPACE` to continue.
+   - Press `SPACE` / `Z` or SNES `B` to continue.
    - Card backs are shown again, ready for next hand.
 5. **Rewards phase**
    - You may be rewarded with a well-deserved surprise as you progress through the game, even if you are not too lucky with poker hands. If you do win a few hands, rewards may appear sooner.
 
 If credits reach `0`, the bottom banner shows:
 `CREDIT OVER! PRESS ENTER TO START!`
-After `ENTER/SPACE`, the game returns to the splash screen, then resets bankroll
+After `ENTER` or SNES `START`, the game returns to the splash screen, then resets bankroll
 and re-enters the bet phase.
 
 ## Hand Ranking and Payout
